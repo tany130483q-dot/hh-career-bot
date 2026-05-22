@@ -7,7 +7,7 @@ from urllib.parse import quote
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise ValueError("Не найден BOT_TOKEN в Render Environment Variables")
+    raise ValueError("Не найден BOT_TOKEN")
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -17,18 +17,34 @@ def main_keyboard():
 
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
     keyboard.row("📊 Аналитик", "🏠 Удаленка")
-    keyboard.row("🔥 Лучшие сегодня", "🚫 Без продаж")
-    keyboard.row("❓ Помощь")
+    keyboard.row("🏢 Гибрид СПб", "🔥 Лучшие сегодня")
+    keyboard.row("🚫 Без продаж", "❓ Помощь")
 
     return keyboard
 
 
-def make_hh_link(query, salary=100000, remote=False):
+def make_hh_link(query, salary=100000, mode="spb"):
     encoded_query = quote(query)
 
+    if mode == "remote":
+        base_url = "https://hh.ru/search/vacancy"
+        area = "113"          # вся Россия
+        schedule = "remote"   # удаленка
+
+    elif mode == "hybrid":
+        base_url = "https://spb.hh.ru/search/vacancy"
+        area = "2"            # Санкт-Петербург
+        schedule = "flexible" # гибкий / гибридный формат
+
+    else:
+        base_url = "https://spb.hh.ru/search/vacancy"
+        area = "2"
+        schedule = ""
+
     link = (
-        "https://spb.hh.ru/search/vacancy"
+        f"{base_url}"
         f"?text={encoded_query}"
+        f"&area={area}"
         f"&salary={salary}"
         "&only_with_salary=true"
         "&search_field=name"
@@ -36,53 +52,49 @@ def make_hh_link(query, salary=100000, remote=False):
         "&search_field=description"
     )
 
-    if remote:
-        link += "&schedule=remote"
+    if schedule:
+        link += f"&schedule={schedule}"
 
     return link
 
 
-def send_search_link(message, title, query, salary=100000, remote=False):
-    link = make_hh_link(query, salary=salary, remote=remote)
+def send_search_link(message, title, query, salary=100000, mode="spb"):
+    link = make_hh_link(query, salary=salary, mode=mode)
+
+    if mode == "remote":
+        region_text = "все города / удаленно"
+    elif mode == "hybrid":
+        region_text = "Санкт-Петербург / гибрид"
+    else:
+        region_text = "Санкт-Петербург"
 
     text = (
         f"{title}\n\n"
         f"🔍 Запрос: {query}\n"
-        f"💰 Зарплата: от {salary} ₽\n"
+        f"📍 Регион: {region_text}\n"
+        f"💰 Зарплата: от {salary} ₽\n\n"
+        f"🔗 {link}"
     )
 
-    if remote:
-        text += "🏠 Формат: удаленно\n"
-
-    text += f"\n🔗 {link}"
-
-    bot.send_message(
-        message.chat.id,
-        text,
-        reply_markup=main_keyboard()
-    )
+    bot.send_message(message.chat.id, text, reply_markup=main_keyboard())
 
 
 def send_best_today(message):
     text = (
         "🔥 Лучшие направления на сегодня:\n\n"
-        "1️⃣ Закупки\n"
-        f"{make_hh_link('менеджер по закупкам')}\n\n"
-        "2️⃣ Товародвижение\n"
-        f"{make_hh_link('менеджер по товародвижению')}\n\n"
-        "3️⃣ Аналитик\n"
-        f"{make_hh_link('аналитик')}\n\n"
-        "4️⃣ Координатор\n"
-        f"{make_hh_link('координатор')}\n\n"
-        "5️⃣ Удаленная работа\n"
-        f"{make_hh_link('удаленная работа менеджер', remote=True)}"
+        "1️⃣ Закупки — СПб\n"
+        f"{make_hh_link('менеджер по закупкам', mode='spb')}\n\n"
+        "2️⃣ Товародвижение — СПб\n"
+        f"{make_hh_link('менеджер по товародвижению', mode='spb')}\n\n"
+        "3️⃣ Аналитик — СПб\n"
+        f"{make_hh_link('аналитик', mode='spb')}\n\n"
+        "4️⃣ Удаленка — все города\n"
+        f"{make_hh_link('менеджер координатор аналитик', mode='remote')}\n\n"
+        "5️⃣ Гибрид — только Санкт-Петербург\n"
+        f"{make_hh_link('менеджер координатор аналитик', mode='hybrid')}"
     )
 
-    bot.send_message(
-        message.chat.id,
-        text,
-        reply_markup=main_keyboard()
-    )
+    bot.send_message(message.chat.id, text, reply_markup=main_keyboard())
 
 
 @bot.message_handler(commands=["start"])
@@ -91,6 +103,9 @@ def start(message):
         message.chat.id,
         "Бот работает ✅\n\n"
         "Я карьерный ассистент для поиска вакансий на HH.\n\n"
+        "Логика поиска:\n"
+        "🏠 Удаленка — все города\n"
+        "🏢 Гибрид — только Санкт-Петербург\n\n"
         "Выбери направление кнопкой ниже 👇",
         reply_markup=main_keyboard()
     )
@@ -102,12 +117,13 @@ def help_command(message):
         message.chat.id,
         "Команды:\n\n"
         "/start — открыть меню\n"
-        "/search текст вакансии — ручной поиск\n\n"
+        "/search текст вакансии — ручной поиск по СПб\n\n"
         "Кнопки:\n"
-        "🔎 Закупки — вакансии по закупкам\n"
-        "📦 Товародвижение — товародвижение и товарные процессы\n"
-        "📊 Аналитик — аналитические вакансии\n"
-        "🏠 Удаленка — удаленные вакансии\n"
+        "🔎 Закупки — СПб\n"
+        "📦 Товародвижение — СПб\n"
+        "📊 Аналитик — СПб\n"
+        "🏠 Удаленка — все города\n"
+        "🏢 Гибрид СПб — только Санкт-Петербург\n"
         "🔥 Лучшие сегодня — подборка направлений\n"
         "🚫 Без продаж — поиск без активных продаж",
         reply_markup=main_keyboard()
@@ -131,7 +147,8 @@ def manual_search(message):
     send_search_link(
         message,
         "🔎 Ручной поиск HH",
-        query
+        query,
+        mode="spb"
     )
 
 
@@ -140,7 +157,8 @@ def purchases(message):
     send_search_link(
         message,
         "🔎 Закупки",
-        "менеджер по закупкам"
+        "менеджер по закупкам",
+        mode="spb"
     )
 
 
@@ -149,7 +167,8 @@ def goods_movement(message):
     send_search_link(
         message,
         "📦 Товародвижение",
-        "менеджер по товародвижению"
+        "менеджер по товародвижению",
+        mode="spb"
     )
 
 
@@ -158,7 +177,8 @@ def analyst(message):
     send_search_link(
         message,
         "📊 Аналитик",
-        "аналитик"
+        "аналитик",
+        mode="spb"
     )
 
 
@@ -166,9 +186,19 @@ def analyst(message):
 def remote(message):
     send_search_link(
         message,
-        "🏠 Удаленная работа",
-        "удаленная работа менеджер",
-        remote=True
+        "🏠 Удаленка — все города",
+        "менеджер координатор аналитик",
+        mode="remote"
+    )
+
+
+@bot.message_handler(func=lambda message: message.text == "🏢 Гибрид СПб")
+def hybrid_spb(message):
+    send_search_link(
+        message,
+        "🏢 Гибрид — Санкт-Петербург",
+        "менеджер координатор аналитик",
+        mode="hybrid"
     )
 
 
@@ -182,7 +212,8 @@ def no_sales(message):
     send_search_link(
         message,
         "🚫 Поиск без активных продаж",
-        "менеджер координатор аналитик -продажи -холодные -звонки -клиенты"
+        "менеджер координатор аналитик -продажи -холодные -звонки -клиенты",
+        mode="spb"
     )
 
 
