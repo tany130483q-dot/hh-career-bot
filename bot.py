@@ -1,6 +1,7 @@
 import os
 import requests
 import telebot
+from urllib.parse import quote
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -10,68 +11,39 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 
-HH_API_URL = "https://api.hh.ru/vacancies"
-
-
-def format_salary(salary):
-    if not salary:
-        return "зарплата не указана"
-
-    salary_from = salary.get("from")
-    salary_to = salary.get("to")
-    currency = salary.get("currency", "RUR")
-
-    if currency == "RUR":
-        currency = "₽"
-
-    if salary_from and salary_to:
-        return f"{salary_from}–{salary_to} {currency}"
-    if salary_from:
-        return f"от {salary_from} {currency}"
-    if salary_to:
-        return f"до {salary_to} {currency}"
-
-    return "зарплата не указана"
-
 
 def search_hh_vacancies(query):
-    params = {
-        "text": query,
-        "per_page": 5,
-        "page": 0,
-    }
+    """
+    Поиск через публичную страницу HH.
+    Это временный рабочий вариант, если api.hh.ru возвращает 403.
+    """
 
-    headers = {
-        "User-Agent": "HH-Career-Bot/1.0 (tany.130483q@gmail.com)",
-        "Accept": "application/json",
-    }
-
-    response = requests.get(
-        HH_API_URL,
-        params=params,
-        headers=headers,
-        timeout=20,
+    search_url = (
+        "https://spb.hh.ru/search/vacancy"
+        f"?text={quote(query)}"
+        "&salary=100000"
+        "&only_with_salary=true"
+        "&from=suggest_post"
     )
 
-    response.raise_for_status()
-
-    data = response.json()
-    return data.get("items", [])
+    return [
+        {
+            "name": f"Открыть поиск HH: {query}",
+            "company": "HeadHunter",
+            "city": "Санкт-Петербург / удаленно",
+            "salary": "от 100 000 ₽",
+            "url": search_url,
+        }
+    ]
 
 
 def format_vacancy(vacancy):
-    name = vacancy.get("name", "Без названия")
-    company = vacancy.get("employer", {}).get("name", "Компания не указана")
-    city = vacancy.get("area", {}).get("name", "Город не указан")
-    url = vacancy.get("alternate_url", "")
-    salary = format_salary(vacancy.get("salary"))
-
     return (
-        f"💼 {name}\n"
-        f"🏢 {company}\n"
-        f"📍 {city}\n"
-        f"💰 {salary}\n"
-        f"🔗 {url}"
+        f"💼 {vacancy['name']}\n"
+        f"🏢 {vacancy['company']}\n"
+        f"📍 {vacancy['city']}\n"
+        f"💰 {vacancy['salary']}\n"
+        f"🔗 {vacancy['url']}"
     )
 
 
@@ -80,8 +52,8 @@ def start(message):
     bot.reply_to(
         message,
         "Бот работает ✅\n\n"
-        "Я умею искать вакансии на HH.\n\n"
-        "Напиши команду так:\n"
+        "Я ищу вакансии на HH.\n\n"
+        "Команда:\n"
         "/search менеджер по закупкам"
     )
 
@@ -114,33 +86,10 @@ def search(message):
 
     bot.reply_to(message, f"Ищу вакансии: {query}")
 
-    try:
-        vacancies = search_hh_vacancies(query)
+    vacancies = search_hh_vacancies(query)
 
-        if not vacancies:
-            bot.send_message(
-                message.chat.id,
-                "Вакансии не найдены. Попробуй другой запрос."
-            )
-            return
-
-        for vacancy in vacancies:
-            bot.send_message(
-                message.chat.id,
-                format_vacancy(vacancy)
-            )
-
-    except requests.exceptions.HTTPError as error:
-        bot.send_message(
-            message.chat.id,
-            f"Ошибка HH API: {error}"
-        )
-
-    except Exception as error:
-        bot.send_message(
-            message.chat.id,
-            f"Ошибка при поиске вакансий: {error}"
-        )
+    for vacancy in vacancies:
+        bot.send_message(message.chat.id, format_vacancy(vacancy))
 
 
 @bot.message_handler(func=lambda message: True)
