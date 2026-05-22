@@ -2,7 +2,11 @@ import os
 import requests
 import telebot
 
+
 TOKEN = os.getenv("BOT_TOKEN")
+
+if not TOKEN:
+    raise ValueError("Не найден BOT_TOKEN. Проверь Environment Variables в Render.")
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -41,13 +45,21 @@ def search_hh_vacancies(query):
     }
 
     headers = {
-    "User-Agent": "Mozilla/5.0"
-}
+        "User-Agent": "HH-Career-Bot/1.0 (tany.130483q@gmail.com)",
+        "Accept": "application/json",
+    }
 
-    response = requests.get(HH_API_URL, params=params, headers=headers, timeout=20)
+    response = requests.get(
+        HH_API_URL,
+        params=params,
+        headers=headers,
+        timeout=20,
+    )
+
     response.raise_for_status()
 
-    return response.json().get("items", [])
+    data = response.json()
+    return data.get("items", [])
 
 
 def format_vacancy(vacancy):
@@ -71,7 +83,7 @@ def start(message):
     bot.reply_to(
         message,
         "Бот работает ✅\n\n"
-        "Теперь я умею искать вакансии на HH.\n\n"
+        "Я умею искать вакансии на HH.\n\n"
         "Напиши команду так:\n"
         "/search менеджер по закупкам"
     )
@@ -81,8 +93,9 @@ def start(message):
 def help_command(message):
     bot.reply_to(
         message,
-        "Команды:\n"
+        "Команды:\n\n"
         "/start — запуск\n"
+        "/help — помощь\n"
         "/search текст вакансии — поиск вакансий HH\n\n"
         "Пример:\n"
         "/search координатор"
@@ -115,7 +128,18 @@ def search(message):
             return
 
         for vacancy in vacancies:
-            bot.send_message(message.chat.id, format_vacancy(vacancy))
+            bot.send_message(
+                message.chat.id,
+                format_vacancy(vacancy)
+            )
+
+    except requests.exceptions.HTTPError as error:
+        bot.send_message(
+            message.chat.id,
+            f"Ошибка HH API: {error}\n\n"
+            "Скорее всего HH временно заблокировал запрос. "
+            "Попробуем исправить фильтры или User-Agent."
+        )
 
     except Exception as error:
         bot.send_message(
@@ -124,4 +148,15 @@ def search(message):
         )
 
 
-bot.infinity_polling()
+@bot.message_handler(func=lambda message: True)
+def unknown_message(message):
+    bot.reply_to(
+        message,
+        "Я пока понимаю только команды:\n"
+        "/start\n"
+        "/help\n"
+        "/search менеджер по закупкам"
+    )
+
+
+bot.infinity_polling(timeout=60, long_polling_timeout=60)
