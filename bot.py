@@ -1,4 +1,5 @@
 import os
+import requests
 import telebot
 from telebot import types
 from urllib.parse import quote
@@ -7,44 +8,117 @@ from urllib.parse import quote
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise ValueError("Не найден BOT_TOKEN. Проверь Environment Variables в Render.")
+    raise ValueError("Не найден BOT_TOKEN в Render Environment Variables")
 
 bot = telebot.TeleBot(TOKEN)
 
-
-def make_hh_link(query):
-    encoded_query = quote(query)
-
-    return (
-        "https://spb.hh.ru/search/vacancy"
-        f"?text={encoded_query}"
-        "&salary=100000"
-        "&only_with_salary=true"
-        "&from=suggest_post"
-    )
+HH_API_URL = "https://api.hh.ru/vacancies"
 
 
 def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
     keyboard.row("📊 Аналитик", "🏠 Удаленка")
     keyboard.row("❓ Помощь")
-
     return keyboard
 
 
-def send_hh_search(message, query):
-    link = make_hh_link(query)
-
-    text = (
-        f"🔍 Поиск вакансий: {query}\n\n"
-        f"📍 Регион: Санкт-Петербург / удаленно\n"
-        f"💰 Зарплата: от 100 000 ₽\n\n"
-        f"🔗 {link}"
+def make_hh_link(query):
+    return (
+        "https://spb.hh.ru/search/vacancy"
+        f"?text={quote(query)}"
+        "&salary=100000"
+        "&only_with_salary=true"
     )
 
-    bot.send_message(message.chat.id, text)
+
+def format_salary(salary):
+    if not salary:
+        return "зарплата не указана"
+
+    salary_from = salary.get("from")
+    salary_to = salary.get("to")
+    currency = salary.get("currency", "RUR")
+
+    if currency == "RUR":
+        currency = "₽"
+
+    if salary_from and salary_to:
+        return f"{salary_from}–{salary_to} {currency}"
+    if salary_from:
+        return f"от {salary_from} {currency}"
+    if salary_to:
+        return f"до {salary_to} {currency}"
+
+    return "зарплата не указана"
+
+
+def get_real_vacancies(query):
+    params = {
+        "text": query,
+        "per_page": 5,
+        "page": 0,
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; CareerAssistantBot/1.0; +https://t.me)",
+        "Accept": "application/json",
+    }
+
+    response = requests.get(
+        HH_API_URL,
+        params=params,
+        headers=headers,
+        timeout=20
+    )
+
+    response.raise_for_status()
+    return response.json().get("items", [])
+
+
+def format_vacancy(vacancy):
+    name = vacancy.get("name", "Без названия")
+    company = vacancy.get("employer", {}).get("name", "Компания не указана")
+    city = vacancy.get("area", {}).get("name", "Город не указан")
+    url = vacancy.get("alternate_url", "")
+    salary = format_salary(vacancy.get("salary"))
+
+    return (
+        f"📌 {name}\n"
+        f"🏢 {company}\n"
+        f"📍 {city}\n"
+        f"💰 {salary}\n"
+        f"🔗 {url}"
+    )
+
+
+def send_vacancies(message, query):
+    bot.send_message(message.chat.id, f"Ищу реальные вакансии: {query}")
+
+    try:
+        vacancies = get_real_vacancies(query)
+
+        if not vacancies:
+            bot.send_message(
+                message.chat.id,
+                "Вакансии не найдены. Попробуй другой запрос.",
+                reply_markup=main_keyboard()
+            )
+            return
+
+        for vacancy in vacancies:
+            bot.send_message(message.chat.id, format_vacancy(vacancy))
+
+    except Exception:
+        link = make_hh_link(query)
+
+        bot.send_message(
+            message.chat.id,
+            "HH API сейчас не отдает вакансии напрямую.\n"
+            "Даю рабочую ссылку на поиск HH:\n\n"
+            f"🔗 {link}",
+            reply_markup=main_keyboard()
+        )
 
 
 @bot.message_handler(commands=["start"])
@@ -65,7 +139,7 @@ def help_command(message):
         "Команды:\n\n"
         "/start — открыть меню\n"
         "/search текст вакансии — ручной поиск\n\n"
-        "Также можно пользоваться кнопками ниже.",
+        "Или нажми кнопку ниже.",
         reply_markup=main_keyboard()
     )
 
@@ -78,47 +152,44 @@ def search(message):
         bot.send_message(
             message.chat.id,
             "Напиши запрос после команды.\n\n"
-            "Пример:\n"
-            "/search менеджер по закупкам",
+            "Пример:\n/search менеджер по закупкам",
             reply_markup=main_keyboard()
         )
         return
 
-    send_hh_search(message, query)
+    send_vacancies(message, query)
 
 
 @bot.message_handler(func=lambda message: message.text == "🔎 Закупки")
-def button_purchases(message):
-    send_hh_search(message, "менеджер по закупкам")
+def purchases(message):
+    send_vacancies(message, "менеджер по закупкам")
 
 
 @bot.message_handler(func=lambda message: message.text == "📦 Товародвижение")
-def button_goods_movement(message):
-    send_hh_search(message, "менеджер по товародвижению")
+def goods_movement(message):
+    send_vacancies(message, "менеджер по товародвижению")
 
 
 @bot.message_handler(func=lambda message: message.text == "📊 Аналитик")
-def button_analyst(message):
-    send_hh_search(message, "аналитик")
+def analyst(message):
+    send_vacancies(message, "аналитик")
 
 
 @bot.message_handler(func=lambda message: message.text == "🏠 Удаленка")
-def button_remote(message):
-    send_hh_search(message, "удаленная работа менеджер")
+def remote(message):
+    send_vacancies(message, "удаленная работа менеджер")
 
 
 @bot.message_handler(func=lambda message: message.text == "❓ Помощь")
-def button_help(message):
+def help_button(message):
     help_command(message)
 
 
 @bot.message_handler(func=lambda message: True)
-def unknown_message(message):
+def unknown(message):
     bot.send_message(
         message.chat.id,
-        "Я пока понимаю команды и кнопки.\n\n"
-        "Нажми кнопку ниже или напиши:\n"
-        "/search менеджер по закупкам",
+        "Нажми кнопку ниже или напиши:\n/search менеджер по закупкам",
         reply_markup=main_keyboard()
     )
 
