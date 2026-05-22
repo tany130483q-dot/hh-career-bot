@@ -33,7 +33,8 @@ def make_hh_link(query, salary=100000, mode="remote"):
             "&area=113"
             f"&salary={salary}"
             "&only_with_salary=true"
-            "&schedule=remote"
+            "&schedule=fullDay"
+            "&work_format=REMOTE"
             "&search_field=name"
             "&search_field=company_name"
             "&search_field=description"
@@ -46,7 +47,8 @@ def make_hh_link(query, salary=100000, mode="remote"):
             "&area=2"
             f"&salary={salary}"
             "&only_with_salary=true"
-            "&schedule=flexible"
+            "&schedule=fullDay"
+            "&work_format=HYBRID"
             "&search_field=name"
             "&search_field=company_name"
             "&search_field=description"
@@ -62,13 +64,14 @@ def send_two_search_links(message, title, query, salary=100000):
     text = (
         f"{title}\n\n"
         f"🔍 Запрос: {query}\n"
-        f"💰 Зарплата: от {salary} ₽\n\n"
+        f"💰 Зарплата: от {salary} ₽\n"
+        f"📅 График: 5/2\n\n"
         f"Показываю только подходящие форматы:\n\n"
         f"🏠 Удаленка — все города\n"
         f"{remote_link}\n\n"
         f"🏢 Гибрид — только Санкт-Петербург\n"
         f"{hybrid_link}\n\n"
-        f"❌ Вакансии «на месте работодателя» не используются."
+        f"❌ Вакансии «на месте работодателя» исключаем."
     )
 
     bot.send_message(
@@ -83,7 +86,8 @@ def send_best_today(message):
         "🔥 Лучшие направления на сегодня\n\n"
         "Везде используются только:\n"
         "🏠 удаленка — все города\n"
-        "🏢 гибрид — Санкт-Петербург\n\n"
+        "🏢 гибрид — Санкт-Петербург\n"
+        "📅 график — 5/2\n\n"
 
         "1️⃣ Закупки\n"
         f"🏠 {make_hh_link('менеджер по закупкам', mode='remote')}\n"
@@ -117,7 +121,8 @@ def start(message):
         "Я карьерный ассистент для поиска вакансий на HH.\n\n"
         "Ищу только два формата:\n"
         "🏠 удаленка — все города\n"
-        "🏢 гибрид — только Санкт-Петербург\n\n"
+        "🏢 гибрид — только Санкт-Петербург\n"
+        "📅 график — 5/2\n\n"
         "Вакансии «на месте работодателя» исключаем.",
         reply_markup=main_keyboard()
     )
@@ -133,7 +138,8 @@ def help_command(message):
         "Важно:\n"
         "Любой поиск дает только 2 варианта:\n"
         "🏠 удаленка — все города\n"
-        "🏢 гибрид — Санкт-Петербург\n\n"
+        "🏢 гибрид — Санкт-Петербург\n"
+        "📅 график — 5/2\n\n"
         "Обычные офисные вакансии не используем.",
         reply_markup=main_keyboard()
     )
