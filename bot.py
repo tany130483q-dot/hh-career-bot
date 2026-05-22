@@ -16,9 +16,8 @@ def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
-    keyboard.row("📊 Аналитик", "🧩 Координатор")
-    keyboard.row("🔥 Лучшие сегодня", "🚫 Без продаж")
-    keyboard.row("❓ Помощь")
+    keyboard.row("📊 Аналитик", "🔥 Лучшие сегодня")
+    keyboard.row("🚫 Без продаж", "❓ Помощь")
 
     return keyboard
 
@@ -99,11 +98,7 @@ def send_best_today(message):
 
         "3️⃣ Аналитик\n"
         f"🏠 {make_hh_link('аналитик', mode='remote')}\n"
-        f"🏢 {make_hh_link('аналитик', mode='hybrid_spb')}\n\n"
-
-        "4️⃣ Координатор\n"
-        f"🏠 {make_hh_link('координатор', mode='remote')}\n"
-        f"🏢 {make_hh_link('координатор', mode='hybrid_spb')}"
+        f"🏢 {make_hh_link('аналитик', mode='hybrid_spb')}"
     )
 
     bot.send_message(
@@ -193,15 +188,6 @@ def analyst(message):
     )
 
 
-@bot.message_handler(func=lambda message: message.text == "🧩 Координатор")
-def coordinator(message):
-    send_two_search_links(
-        message,
-        "🧩 Координатор",
-        "координатор"
-    )
-
-
 @bot.message_handler(func=lambda message: message.text == "🔥 Лучшие сегодня")
 def best_today(message):
     send_best_today(message)
@@ -212,7 +198,7 @@ def no_sales(message):
     send_two_search_links(
         message,
         "🚫 Поиск без активных продаж",
-        "менеджер координатор аналитик -продажи -холодные -звонки -клиенты"
+        "менеджер аналитик -продажи -холодные -звонки -клиенты"
     )
 
 
