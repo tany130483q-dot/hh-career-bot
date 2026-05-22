@@ -14,6 +14,30 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 
 
+BAD_WORDS = [
+    "маркетплейс",
+    "маркетплейсов",
+    "wildberries",
+    "wb",
+    "ozon",
+    "яндекс маркет",
+    "склад",
+    "склада",
+    "кладовщик",
+    "оператор",
+    "продавец",
+    "продажи",
+    "продаж",
+    "менеджер по продажам",
+    "координатор",
+    "товарные запасы",
+    "товарным запасам",
+    "контакт-центр",
+    "call-центр",
+    "колл-центр",
+]
+
+
 def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
@@ -52,6 +76,21 @@ def make_hh_link(query, salary=100000, mode="remote"):
     return ""
 
 
+def is_good_vacancy(vacancy):
+    text = (
+        vacancy.get("title", "") + " " +
+        vacancy.get("company", "") + " " +
+        vacancy.get("salary", "") + " " +
+        vacancy.get("address", "")
+    ).lower()
+
+    for bad_word in BAD_WORDS:
+        if bad_word in text:
+            return False
+
+    return True
+
+
 def get_vacancies_from_hh(query, mode="remote", limit=5):
     url = make_hh_link(query, mode=mode)
 
@@ -73,7 +112,7 @@ def get_vacancies_from_hh(query, mode="remote", limit=5):
 
     vacancies = []
 
-    for card in cards[:limit]:
+    for card in cards:
         title_tag = card.select_one("[data-qa='serp-item__title']")
         company_tag = card.select_one("[data-qa='vacancy-serp__vacancy-employer']")
         salary_tag = card.select_one("[data-qa='vacancy-serp__vacancy-compensation']")
@@ -89,15 +128,19 @@ def get_vacancies_from_hh(query, mode="remote", limit=5):
         salary = salary_tag.get_text(strip=True) if salary_tag else "Зарплата не указана"
         address = address_tag.get_text(strip=True) if address_tag else "Город не указан"
 
-        vacancies.append(
-            {
-                "title": title,
-                "company": company,
-                "salary": salary,
-                "address": address,
-                "link": link,
-            }
-        )
+        vacancy = {
+            "title": title,
+            "company": company,
+            "salary": salary,
+            "address": address,
+            "link": link,
+        }
+
+        if is_good_vacancy(vacancy):
+            vacancies.append(vacancy)
+
+        if len(vacancies) >= limit:
+            break
 
     return vacancies
 
@@ -132,13 +175,14 @@ def send_fallback_links(message, title, query):
 
     text = (
         f"{title}\n\n"
-        f"Не смогла получить карточки автоматически.\n"
+        f"Не смогла получить подходящие карточки автоматически.\n"
         f"Открывай поиск вручную через кнопки ниже.\n\n"
         f"Фильтры сохранены:\n"
         f"🏠 удаленка — все города\n"
         f"🏢 гибрид — Санкт-Петербург\n"
         f"📅 график — только 5/2\n"
-        f"💰 зарплата — от 100 000 ₽"
+        f"💰 зарплата — от 100 000 ₽\n\n"
+        f"Мусорные вакансии отфильтрованы, но если HH не отдал чистые карточки — лучше открыть поиск вручную."
     )
 
     bot.send_message(message.chat.id, text, reply_markup=keyboard)
@@ -147,7 +191,7 @@ def send_fallback_links(message, title, query):
 def send_real_vacancies(message, title, query):
     bot.send_message(
         message.chat.id,
-        f"{title}\n\nИщу реальные вакансии...",
+        f"{title}\n\nИщу реальные вакансии и отсекаю мусор...",
         reply_markup=main_keyboard()
     )
 
@@ -194,7 +238,8 @@ def send_best_today(message):
         "🏠 удаленка — все города\n"
         "🏢 гибрид — Санкт-Петербург\n"
         "📅 график — только 5/2\n"
-        "💰 зарплата — от 100 000 ₽",
+        "💰 зарплата — от 100 000 ₽\n\n"
+        "Мусорные вакансии автоматически скрываются.",
         reply_markup=main_keyboard()
     )
 
@@ -213,7 +258,7 @@ def start(message):
         "🏢 гибрид — Санкт-Петербург\n"
         "📅 график — только 5/2\n"
         "💰 зарплата — от 100 000 ₽\n\n"
-        "Выбери направление кнопкой ниже 👇",
+        "Мусорные вакансии скрываю автоматически.",
         reply_markup=main_keyboard()
     )
 
@@ -231,7 +276,7 @@ def help_command(message):
         "📊 Аналитик\n"
         "🔥 Лучшие сегодня\n"
         "🚫 Без продаж\n\n"
-        "Если HH не отдаст карточки автоматически, бот даст рабочие ссылки.",
+        "Бот скрывает вакансии с продажами, складами, маркетплейсами, операторами и похожим мусором.",
         reply_markup=main_keyboard()
     )
 
