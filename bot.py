@@ -16,85 +16,97 @@ def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
-    keyboard.row("📊 Аналитик", "🏠 Удаленка")
-    keyboard.row("🏢 Гибрид СПб", "🔥 Лучшие сегодня")
-    keyboard.row("🚫 Без продаж", "❓ Помощь")
+    keyboard.row("📊 Аналитик", "🧩 Координатор")
+    keyboard.row("🔥 Лучшие сегодня", "🚫 Без продаж")
+    keyboard.row("❓ Помощь")
 
     return keyboard
 
 
-def make_hh_link(query, salary=100000, mode="spb"):
+def make_hh_link(query, salary=100000, mode="remote"):
     encoded_query = quote(query)
 
     if mode == "remote":
-        base_url = "https://hh.ru/search/vacancy"
-        area = "113"          # вся Россия
-        schedule = "remote"   # удаленка
+        return (
+            "https://hh.ru/search/vacancy"
+            f"?text={encoded_query}"
+            "&area=113"
+            f"&salary={salary}"
+            "&only_with_salary=true"
+            "&schedule=remote"
+            "&search_field=name"
+            "&search_field=company_name"
+            "&search_field=description"
+        )
 
-    elif mode == "hybrid":
-        base_url = "https://spb.hh.ru/search/vacancy"
-        area = "2"            # Санкт-Петербург
-        schedule = "flexible" # гибкий / гибридный формат
+    if mode == "hybrid_spb":
+        return (
+            "https://spb.hh.ru/search/vacancy"
+            f"?text={encoded_query}"
+            "&area=2"
+            f"&salary={salary}"
+            "&only_with_salary=true"
+            "&schedule=flexible"
+            "&search_field=name"
+            "&search_field=company_name"
+            "&search_field=description"
+        )
 
-    else:
-        base_url = "https://spb.hh.ru/search/vacancy"
-        area = "2"
-        schedule = ""
-
-    link = (
-        f"{base_url}"
-        f"?text={encoded_query}"
-        f"&area={area}"
-        f"&salary={salary}"
-        "&only_with_salary=true"
-        "&search_field=name"
-        "&search_field=company_name"
-        "&search_field=description"
-    )
-
-    if schedule:
-        link += f"&schedule={schedule}"
-
-    return link
+    return ""
 
 
-def send_search_link(message, title, query, salary=100000, mode="spb"):
-    link = make_hh_link(query, salary=salary, mode=mode)
-
-    if mode == "remote":
-        region_text = "все города / удаленно"
-    elif mode == "hybrid":
-        region_text = "Санкт-Петербург / гибрид"
-    else:
-        region_text = "Санкт-Петербург"
+def send_two_search_links(message, title, query, salary=100000):
+    remote_link = make_hh_link(query, salary=salary, mode="remote")
+    hybrid_link = make_hh_link(query, salary=salary, mode="hybrid_spb")
 
     text = (
         f"{title}\n\n"
         f"🔍 Запрос: {query}\n"
-        f"📍 Регион: {region_text}\n"
         f"💰 Зарплата: от {salary} ₽\n\n"
-        f"🔗 {link}"
+        f"Показываю только подходящие форматы:\n\n"
+        f"🏠 Удаленка — все города\n"
+        f"{remote_link}\n\n"
+        f"🏢 Гибрид — только Санкт-Петербург\n"
+        f"{hybrid_link}\n\n"
+        f"❌ Вакансии «на месте работодателя» не используются."
     )
 
-    bot.send_message(message.chat.id, text, reply_markup=main_keyboard())
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=main_keyboard()
+    )
 
 
 def send_best_today(message):
     text = (
-        "🔥 Лучшие направления на сегодня:\n\n"
-        "1️⃣ Закупки — СПб\n"
-        f"{make_hh_link('менеджер по закупкам', mode='spb')}\n\n"
-        "2️⃣ Товародвижение — СПб\n"
-        f"{make_hh_link('менеджер по товародвижению', mode='spb')}\n\n"
-        "3️⃣ Аналитик — СПб\n"
-        f"{make_hh_link('аналитик', mode='spb')}\n\n"
-        "4️⃣ Удаленка — все города\n"
-        f"{make_hh_link('менеджер координатор аналитик', mode='remote')}\n\n"
-        "5️⃣ Гибрид — только Санкт-Петербург\n"
-        f"{make_hh_link('менеджер координатор аналитик', mode='hybrid')}"
+        "🔥 Лучшие направления на сегодня\n\n"
+        "Везде используются только:\n"
+        "🏠 удаленка — все города\n"
+        "🏢 гибрид — Санкт-Петербург\n\n"
+
+        "1️⃣ Закупки\n"
+        f"🏠 {make_hh_link('менеджер по закупкам', mode='remote')}\n"
+        f"🏢 {make_hh_link('менеджер по закупкам', mode='hybrid_spb')}\n\n"
+
+        "2️⃣ Товародвижение\n"
+        f"🏠 {make_hh_link('менеджер по товародвижению', mode='remote')}\n"
+        f"🏢 {make_hh_link('менеджер по товародвижению', mode='hybrid_spb')}\n\n"
+
+        "3️⃣ Аналитик\n"
+        f"🏠 {make_hh_link('аналитик', mode='remote')}\n"
+        f"🏢 {make_hh_link('аналитик', mode='hybrid_spb')}\n\n"
+
+        "4️⃣ Координатор\n"
+        f"🏠 {make_hh_link('координатор', mode='remote')}\n"
+        f"🏢 {make_hh_link('координатор', mode='hybrid_spb')}"
     )
 
-    bot.send_message(message.chat.id, text, reply_markup=main_keyboard())
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=main_keyboard()
+    )
 
 
 @bot.message_handler(commands=["start"])
@@ -103,10 +115,10 @@ def start(message):
         message.chat.id,
         "Бот работает ✅\n\n"
         "Я карьерный ассистент для поиска вакансий на HH.\n\n"
-        "Логика поиска:\n"
-        "🏠 Удаленка — все города\n"
-        "🏢 Гибрид — только Санкт-Петербург\n\n"
-        "Выбери направление кнопкой ниже 👇",
+        "Ищу только два формата:\n"
+        "🏠 удаленка — все города\n"
+        "🏢 гибрид — только Санкт-Петербург\n\n"
+        "Вакансии «на месте работодателя» исключаем.",
         reply_markup=main_keyboard()
     )
 
@@ -117,15 +129,12 @@ def help_command(message):
         message.chat.id,
         "Команды:\n\n"
         "/start — открыть меню\n"
-        "/search текст вакансии — ручной поиск по СПб\n\n"
-        "Кнопки:\n"
-        "🔎 Закупки — СПб\n"
-        "📦 Товародвижение — СПб\n"
-        "📊 Аналитик — СПб\n"
-        "🏠 Удаленка — все города\n"
-        "🏢 Гибрид СПб — только Санкт-Петербург\n"
-        "🔥 Лучшие сегодня — подборка направлений\n"
-        "🚫 Без продаж — поиск без активных продаж",
+        "/search текст вакансии — ручной поиск\n\n"
+        "Важно:\n"
+        "Любой поиск дает только 2 варианта:\n"
+        "🏠 удаленка — все города\n"
+        "🏢 гибрид — Санкт-Петербург\n\n"
+        "Обычные офисные вакансии не используем.",
         reply_markup=main_keyboard()
     )
 
@@ -144,61 +153,46 @@ def manual_search(message):
         )
         return
 
-    send_search_link(
+    send_two_search_links(
         message,
         "🔎 Ручной поиск HH",
-        query,
-        mode="spb"
+        query
     )
 
 
 @bot.message_handler(func=lambda message: message.text == "🔎 Закупки")
 def purchases(message):
-    send_search_link(
+    send_two_search_links(
         message,
         "🔎 Закупки",
-        "менеджер по закупкам",
-        mode="spb"
+        "менеджер по закупкам"
     )
 
 
 @bot.message_handler(func=lambda message: message.text == "📦 Товародвижение")
 def goods_movement(message):
-    send_search_link(
+    send_two_search_links(
         message,
         "📦 Товародвижение",
-        "менеджер по товародвижению",
-        mode="spb"
+        "менеджер по товародвижению"
     )
 
 
 @bot.message_handler(func=lambda message: message.text == "📊 Аналитик")
 def analyst(message):
-    send_search_link(
+    send_two_search_links(
         message,
         "📊 Аналитик",
-        "аналитик",
-        mode="spb"
+        "аналитик"
     )
 
 
-@bot.message_handler(func=lambda message: message.text == "🏠 Удаленка")
-def remote(message):
-    send_search_link(
+@bot.message_handler(func=lambda message: message.text == "🧩 Координатор")
+def coordinator(message):
+    send_two_search_links(
         message,
-        "🏠 Удаленка — все города",
-        "менеджер координатор аналитик",
-        mode="remote"
-    )
-
-
-@bot.message_handler(func=lambda message: message.text == "🏢 Гибрид СПб")
-def hybrid_spb(message):
-    send_search_link(
-        message,
-        "🏢 Гибрид — Санкт-Петербург",
-        "менеджер координатор аналитик",
-        mode="hybrid"
+        "🧩 Координатор",
+        "координатор"
     )
 
 
@@ -209,11 +203,10 @@ def best_today(message):
 
 @bot.message_handler(func=lambda message: message.text == "🚫 Без продаж")
 def no_sales(message):
-    send_search_link(
+    send_two_search_links(
         message,
         "🚫 Поиск без активных продаж",
-        "менеджер координатор аналитик -продажи -холодные -звонки -клиенты",
-        mode="spb"
+        "менеджер координатор аналитик -продажи -холодные -звонки -клиенты"
     )
 
 
