@@ -14,6 +14,10 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 
 
+USER_FAVORITES = {}
+USER_LAST_VACANCIES = {}
+
+
 BAD_WORDS_COMMON = [
     "маркетплейс",
     "маркетплейсов",
@@ -129,7 +133,7 @@ def main_keyboard():
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
     keyboard.row("📊 Аналитик", "🗂 Категорийный менеджер")
     keyboard.row("🔥 Лучшие сегодня", "🚫 Без продаж")
-    keyboard.row("❓ Помощь")
+    keyboard.row("⭐ Избранное", "❓ Помощь")
 
     return keyboard
 
@@ -246,7 +250,18 @@ def get_vacancies_from_hh(query, category, mode="remote", limit=5):
     return vacancies
 
 
-def send_vacancy_card(chat_id, vacancy):
+def save_last_vacancy(user_id, vacancy):
+    if user_id not in USER_LAST_VACANCIES:
+        USER_LAST_VACANCIES[user_id] = []
+
+    USER_LAST_VACANCIES[user_id].append(vacancy)
+
+    return len(USER_LAST_VACANCIES[user_id]) - 1
+
+
+def send_vacancy_card(chat_id, user_id, vacancy):
+    vacancy_index = save_last_vacancy(user_id, vacancy)
+
     text = (
         f"📌 {vacancy['title']}\n\n"
         f"🏢 {vacancy['company']}\n"
@@ -257,6 +272,7 @@ def send_vacancy_card(chat_id, vacancy):
 
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(types.InlineKeyboardButton("Открыть вакансию", url=vacancy["link"]))
+    keyboard.add(types.InlineKeyboardButton("⭐ Сохранить", callback_data=f"save_{vacancy_index}"))
 
     bot.send_message(chat_id, text, reply_markup=keyboard)
 
@@ -283,6 +299,10 @@ def send_fallback_links(message, title, query):
 
 
 def send_real_vacancies(message, title, query, category):
+    user_id = message.from_user.id
+
+    USER_LAST_VACANCIES[user_id] = []
+
     bot.send_message(
         message.chat.id,
         f"{title}\n\nИщу вакансии и применяю фильтр...",
@@ -313,13 +333,46 @@ def send_real_vacancies(message, title, query, category):
             found_any = True
 
             for vacancy in vacancies:
-                send_vacancy_card(message.chat.id, vacancy)
+                send_vacancy_card(message.chat.id, user_id, vacancy)
 
         except Exception:
             continue
 
     if not found_any:
         send_fallback_links(message, title, query)
+
+
+def show_favorites(message):
+    user_id = message.from_user.id
+    favorites = USER_FAVORITES.get(user_id, [])
+
+    if not favorites:
+        bot.send_message(
+            message.chat.id,
+            "⭐ Избранное пока пустое.\n\nСохрани вакансию кнопкой ⭐ под карточкой.",
+            reply_markup=main_keyboard()
+        )
+        return
+
+    bot.send_message(
+        message.chat.id,
+        f"⭐ Избранные вакансии: {len(favorites)}",
+        reply_markup=main_keyboard()
+    )
+
+    for vacancy in favorites:
+        text = (
+            f"📌 {vacancy['title']}\n\n"
+            f"🏢 {vacancy['company']}\n"
+            f"💰 {vacancy['salary']}\n"
+            f"📍 {vacancy['address']}\n\n"
+            f"🔗 {vacancy['link']}"
+        )
+
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton("Открыть вакансию", url=vacancy["link"]))
+
+        bot.send_message(message.chat.id, text, reply_markup=keyboard)
 
 
 def send_best_today(message):
@@ -341,6 +394,33 @@ def send_best_today(message):
     send_real_vacancies(message, "🗂 Категорийный менеджер", "категорийный менеджер", "Категорийный менеджер")
 
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
+def save_vacancy_callback(call):
+    user_id = call.from_user.id
+    vacancy_index = int(call.data.replace("save_", ""))
+
+    last_vacancies = USER_LAST_VACANCIES.get(user_id, [])
+
+    if vacancy_index >= len(last_vacancies):
+        bot.answer_callback_query(call.id, "Не смогла сохранить. Обнови поиск.")
+        return
+
+    vacancy = last_vacancies[vacancy_index]
+
+    if user_id not in USER_FAVORITES:
+        USER_FAVORITES[user_id] = []
+
+    already_saved = any(item["link"] == vacancy["link"] for item in USER_FAVORITES[user_id])
+
+    if already_saved:
+        bot.answer_callback_query(call.id, "Эта вакансия уже в избранном ⭐")
+        return
+
+    USER_FAVORITES[user_id].append(vacancy)
+
+    bot.answer_callback_query(call.id, "Вакансия сохранена ⭐")
+
+
 @bot.message_handler(commands=["start"])
 def start(message):
     bot.send_message(
@@ -352,7 +432,7 @@ def start(message):
         "🏢 гибрид — Санкт-Петербург\n"
         "📅 только 5/2\n"
         "💰 от 100 000 ₽\n\n"
-        "Исключаю продажи, маркетплейсы, бизнес/системную аналитику и вакансии с английским.",
+        "Можно сохранять вакансии в ⭐ Избранное.",
         reply_markup=main_keyboard()
     )
 
@@ -370,7 +450,8 @@ def help_command(message):
         "📊 Аналитик\n"
         "🗂 Категорийный менеджер\n"
         "🔥 Лучшие сегодня\n"
-        "🚫 Без продаж",
+        "🚫 Без продаж\n"
+        "⭐ Избранное",
         reply_markup=main_keyboard()
     )
 
@@ -392,42 +473,22 @@ def manual_search(message):
 
 @bot.message_handler(func=lambda message: message.text == "🔎 Закупки")
 def purchases(message):
-    send_real_vacancies(
-        message,
-        "🔎 Закупки",
-        "менеджер по закупкам",
-        "Закупки"
-    )
+    send_real_vacancies(message, "🔎 Закупки", "менеджер по закупкам", "Закупки")
 
 
 @bot.message_handler(func=lambda message: message.text == "📦 Товародвижение")
 def goods_movement(message):
-    send_real_vacancies(
-        message,
-        "📦 Товародвижение",
-        "товародвижение",
-        "Товародвижение"
-    )
+    send_real_vacancies(message, "📦 Товародвижение", "товародвижение", "Товародвижение")
 
 
 @bot.message_handler(func=lambda message: message.text == "📊 Аналитик")
 def analyst(message):
-    send_real_vacancies(
-        message,
-        "📊 Аналитик",
-        "аналитик закупок",
-        "Аналитик"
-    )
+    send_real_vacancies(message, "📊 Аналитик", "аналитик закупок", "Аналитик")
 
 
 @bot.message_handler(func=lambda message: message.text == "🗂 Категорийный менеджер")
 def category_manager(message):
-    send_real_vacancies(
-        message,
-        "🗂 Категорийный менеджер",
-        "категорийный менеджер",
-        "Категорийный менеджер"
-    )
+    send_real_vacancies(message, "🗂 Категорийный менеджер", "категорийный менеджер", "Категорийный менеджер")
 
 
 @bot.message_handler(func=lambda message: message.text == "🔥 Лучшие сегодня")
@@ -437,12 +498,12 @@ def best_today(message):
 
 @bot.message_handler(func=lambda message: message.text == "🚫 Без продаж")
 def no_sales(message):
-    send_real_vacancies(
-        message,
-        "🚫 Без продаж",
-        "аналитик закупок",
-        "Аналитик"
-    )
+    send_real_vacancies(message, "🚫 Без продаж", "аналитик закупок", "Аналитик")
+
+
+@bot.message_handler(func=lambda message: message.text == "⭐ Избранное")
+def favorites(message):
+    show_favorites(message)
 
 
 @bot.message_handler(func=lambda message: message.text == "❓ Помощь")
