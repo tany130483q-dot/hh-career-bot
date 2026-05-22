@@ -35,11 +35,11 @@ def format_salary(salary):
 
 
 def search_hh_vacancies(query):
-   params = {
-    "text": query,
-    "per_page": 5,
-    "page": 0,
-}
+    params = {
+        "text": query,
+        "per_page": 5,
+        "page": 0,
+    }
 
     headers = {
         "User-Agent": "HH-Career-Bot/1.0 (tany.130483q@gmail.com)",
@@ -133,9 +133,7 @@ def search(message):
     except requests.exceptions.HTTPError as error:
         bot.send_message(
             message.chat.id,
-            f"Ошибка HH API: {error}\n\n"
-            "Скорее всего HH временно заблокировал запрос. "
-            "Попробуем исправить фильтры или User-Agent."
+            f"Ошибка HH API: {error}"
         )
 
     except Exception as error:
