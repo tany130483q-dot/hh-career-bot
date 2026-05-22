@@ -33,7 +33,7 @@ def make_hh_link(query, salary=100000, mode="remote"):
             "&area=113"
             f"&salary={salary}"
             "&only_with_salary=true"
-            "&schedule=fullDay"
+            "&work_schedule_by_days=FIVE_ON_TWO_OFF"
             "&work_format=REMOTE"
             "&search_field=name"
             "&search_field=company_name"
@@ -47,7 +47,7 @@ def make_hh_link(query, salary=100000, mode="remote"):
             "&area=2"
             f"&salary={salary}"
             "&only_with_salary=true"
-            "&schedule=fullDay"
+            "&work_schedule_by_days=FIVE_ON_TWO_OFF"
             "&work_format=HYBRID"
             "&search_field=name"
             "&search_field=company_name"
@@ -65,7 +65,7 @@ def send_two_search_links(message, title, query, salary=100000):
         f"{title}\n\n"
         f"🔍 Запрос: {query}\n"
         f"💰 Зарплата: от {salary} ₽\n"
-        f"📅 График: 5/2\n\n"
+        f"📅 График: только 5/2\n\n"
         f"Показываю только подходящие форматы:\n\n"
         f"🏠 Удаленка — все города\n"
         f"{remote_link}\n\n"
@@ -87,7 +87,7 @@ def send_best_today(message):
         "Везде используются только:\n"
         "🏠 удаленка — все города\n"
         "🏢 гибрид — Санкт-Петербург\n"
-        "📅 график — 5/2\n\n"
+        "📅 график — только 5/2\n\n"
 
         "1️⃣ Закупки\n"
         f"🏠 {make_hh_link('менеджер по закупкам', mode='remote')}\n"
@@ -122,7 +122,7 @@ def start(message):
         "Ищу только два формата:\n"
         "🏠 удаленка — все города\n"
         "🏢 гибрид — только Санкт-Петербург\n"
-        "📅 график — 5/2\n\n"
+        "📅 график — только 5/2\n\n"
         "Вакансии «на месте работодателя» исключаем.",
         reply_markup=main_keyboard()
     )
@@ -139,7 +139,7 @@ def help_command(message):
         "Любой поиск дает только 2 варианта:\n"
         "🏠 удаленка — все города\n"
         "🏢 гибрид — Санкт-Петербург\n"
-        "📅 график — 5/2\n\n"
+        "📅 график — только 5/2\n\n"
         "Обычные офисные вакансии не используем.",
         reply_markup=main_keyboard()
     )
