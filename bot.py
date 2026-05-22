@@ -35,14 +35,11 @@ def format_salary(salary):
 
 
 def search_hh_vacancies(query):
-    params = {
-        "text": query,
-        "area": 2,
-        "salary": 100000,
-        "only_with_salary": True,
-        "per_page": 5,
-        "page": 0,
-    }
+   params = {
+    "text": query,
+    "per_page": 5,
+    "page": 0,
+}
 
     headers = {
         "User-Agent": "HH-Career-Bot/1.0 (tany.130483q@gmail.com)",
