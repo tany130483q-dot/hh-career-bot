@@ -41,8 +41,8 @@ def search_hh_vacancies(query):
     }
 
     headers = {
-        "User-Agent": "HH Career Telegram Bot / tany.130483q@gmail.com"
-    }
+    "User-Agent": "Mozilla/5.0"
+}
 
     response = requests.get(HH_API_URL, params=params, headers=headers, timeout=20)
     response.raise_for_status()
