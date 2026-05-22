@@ -1,5 +1,7 @@
 import os
+import requests
 import telebot
+from bs4 import BeautifulSoup
 from telebot import types
 from urllib.parse import quote
 
@@ -14,11 +16,9 @@ bot = telebot.TeleBot(TOKEN)
 
 def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
     keyboard.row("📊 Аналитик", "🔥 Лучшие сегодня")
     keyboard.row("🚫 Без продаж", "❓ Помощь")
-
     return keyboard
 
 
@@ -34,9 +34,6 @@ def make_hh_link(query, salary=100000, mode="remote"):
             "&only_with_salary=true"
             "&work_schedule_by_days=FIVE_ON_TWO_OFF"
             "&work_format=REMOTE"
-            "&search_field=name"
-            "&search_field=company_name"
-            "&search_field=description"
         )
 
     if mode == "hybrid_spb":
@@ -48,75 +45,99 @@ def make_hh_link(query, salary=100000, mode="remote"):
             "&only_with_salary=true"
             "&work_schedule_by_days=FIVE_ON_TWO_OFF"
             "&work_format=HYBRID"
-            "&search_field=name"
-            "&search_field=company_name"
-            "&search_field=description"
         )
 
     return ""
 
 
-def search_buttons(query):
-    keyboard = types.InlineKeyboardMarkup()
+def get_vacancies_from_hh(query, mode="remote", limit=5):
+    url = make_hh_link(query, mode=mode)
 
-    remote_link = make_hh_link(query, mode="remote")
-    hybrid_link = make_hh_link(query, mode="hybrid_spb")
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    }
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🏠 Открыть удаленные вакансии",
-            url=remote_link
-        )
-    )
+    response = requests.get(url, headers=headers, timeout=20)
+    response.raise_for_status()
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🏢 Открыть гибрид СПб",
-            url=hybrid_link
-        )
-    )
+    soup = BeautifulSoup(response.text, "lxml")
 
-    return keyboard
+    cards = soup.select("[data-qa='vacancy-serp__vacancy']")
+
+    vacancies = []
+
+    for card in cards[:limit]:
+        title_tag = card.select_one("[data-qa='serp-item__title']")
+        company_tag = card.select_one("[data-qa='vacancy-serp__vacancy-employer']")
+        salary_tag = card.select_one("[data-qa='vacancy-serp__vacancy-compensation']")
+        address_tag = card.select_one("[data-qa='vacancy-serp__vacancy-address']")
+
+        if not title_tag:
+            continue
+
+        title = title_tag.get_text(strip=True)
+        link = title_tag.get("href", "")
+
+        company = company_tag.get_text(strip=True) if company_tag else "Компания не указана"
+        salary = salary_tag.get_text(strip=True) if salary_tag else "Зарплата не указана"
+        address = address_tag.get_text(strip=True) if address_tag else "Город не указан"
+
+        vacancies.append({
+            "title": title,
+            "company": company,
+            "salary": salary,
+            "address": address,
+            "link": link,
+        })
+
+    return vacancies
 
 
-def send_search_card(message, title, query, salary=100000):
+def send_vacancy_card(chat_id, vacancy):
     text = (
-        f"{title}\n\n"
-        f"🔍 Запрос: {query}\n"
-        f"💰 Зарплата: от {salary} ₽\n"
-        f"📅 График: только 5/2\n\n"
-        f"Показываю только подходящие форматы:\n"
-        f"🏠 удаленка — все города\n"
-        f"🏢 гибрид — Санкт-Петербург\n\n"
-        f"❌ Офисные вакансии «на месте работодателя» исключаем."
+        f"📌 {vacancy['title']}\n\n"
+        f"🏢 {vacancy['company']}\n"
+        f"💰 {vacancy['salary']}\n"
+        f"📍 {vacancy['address']}\n\n"
+        f"🔗 {vacancy['link']}"
     )
 
-    bot.send_message(
-        message.chat.id,
-        text,
-        reply_markup=search_buttons(query)
-    )
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("Открыть вакансию", url=vacancy["link"]))
+
+    bot.send_message(chat_id, text, reply_markup=keyboard)
 
 
-def send_best_today(message):
-    directions = [
-        ("🔎 Закупки", "менеджер по закупкам"),
-        ("📦 Товародвижение", "менеджер по товародвижению"),
-        ("📊 Аналитик", "аналитик"),
-    ]
+def send_real_vacancies(message, title, query):
+    bot.send_message(message.chat.id, f"{title}\n\nИщу реальные вакансии...")
 
-    bot.send_message(
-        message.chat.id,
-        "🔥 Лучшие направления на сегодня\n\n"
-        "Каждая карточка содержит только:\n"
-        "🏠 удаленку по всем городам\n"
-        "🏢 гибрид по Санкт-Петербургу\n"
-        "📅 график 5/2",
-        reply_markup=main_keyboard()
-    )
+    for mode_name, mode in [
+        ("🏠 Удаленка — все города", "remote"),
+        ("🏢 Гибрид — Санкт-Петербург", "hybrid_spb"),
+    ]:
+        bot.send_message(message.chat.id, mode_name)
 
-    for title, query in directions:
-        send_search_card(message, title, query)
+        try:
+            vacancies = get_vacancies_from_hh(query, mode=mode, limit=3)
+
+            if not vacancies:
+                link = make_hh_link(query, mode=mode)
+                bot.send_message(
+                    message.chat.id,
+                    f"Не смог найти карточки автоматически.\nОткрой поиск вручную:\n{link}"
+                )
+                continue
+
+            for vacancy in vacancies:
+                send_vacancy_card(message.chat.id, vacancy)
+
+        except Exception as error:
+            link = make_hh_link(query, mode=mode)
+            bot.send_message(
+                message.chat.id,
+                f"Не смог получить карточки HH.\nОткрой поиск вручную:\n{link}"
+            )
 
 
 @bot.message_handler(commands=["start"])
@@ -124,30 +145,11 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "Я карьерный ассистент для поиска вакансий на HH.\n\n"
-        "Ищу только:\n"
+        "Ищу вакансии HH карточками.\n\n"
+        "Фильтры:\n"
         "🏠 удаленка — все города\n"
         "🏢 гибрид — Санкт-Петербург\n"
-        "📅 график — только 5/2\n\n"
-        "Выбери направление кнопкой ниже 👇",
-        reply_markup=main_keyboard()
-    )
-
-
-@bot.message_handler(commands=["help"])
-def help_command(message):
-    bot.send_message(
-        message.chat.id,
-        "Команды:\n\n"
-        "/start — открыть меню\n"
-        "/search текст вакансии — ручной поиск\n\n"
-        "Кнопки:\n"
-        "🔎 Закупки\n"
-        "📦 Товародвижение\n"
-        "📊 Аналитик\n"
-        "🔥 Лучшие сегодня\n"
-        "🚫 Без продаж\n\n"
-        "Во всех вариантах бот показывает только удаленку или гибрид СПб.",
+        "📅 график — только 5/2",
         reply_markup=main_keyboard()
     )
 
@@ -157,75 +159,57 @@ def manual_search(message):
     query = message.text.replace("/search", "").strip()
 
     if not query:
-        bot.send_message(
-            message.chat.id,
-            "Напиши запрос после команды.\n\n"
-            "Пример:\n"
-            "/search менеджер по закупкам",
-            reply_markup=main_keyboard()
-        )
+        bot.send_message(message.chat.id, "Пример:\n/search менеджер по закупкам")
         return
 
-    send_search_card(
-        message,
-        "🔎 Ручной поиск HH",
-        query
-    )
+    send_real_vacancies(message, "🔎 Ручной поиск", query)
 
 
 @bot.message_handler(func=lambda message: message.text == "🔎 Закупки")
 def purchases(message):
-    send_search_card(
-        message,
-        "🔎 Закупки",
-        "менеджер по закупкам"
-    )
+    send_real_vacancies(message, "🔎 Закупки", "менеджер по закупкам")
 
 
 @bot.message_handler(func=lambda message: message.text == "📦 Товародвижение")
 def goods_movement(message):
-    send_search_card(
-        message,
-        "📦 Товародвижение",
-        "менеджер по товародвижению"
-    )
+    send_real_vacancies(message, "📦 Товародвижение", "менеджер по товародвижению")
 
 
 @bot.message_handler(func=lambda message: message.text == "📊 Аналитик")
 def analyst(message):
-    send_search_card(
-        message,
-        "📊 Аналитик",
-        "аналитик"
-    )
+    send_real_vacancies(message, "📊 Аналитик", "аналитик")
 
 
 @bot.message_handler(func=lambda message: message.text == "🔥 Лучшие сегодня")
 def best_today(message):
-    send_best_today(message)
+    send_real_vacancies(message, "🔥 Закупки", "менеджер по закупкам")
+    send_real_vacancies(message, "🔥 Товародвижение", "менеджер по товародвижению")
+    send_real_vacancies(message, "🔥 Аналитик", "аналитик")
 
 
 @bot.message_handler(func=lambda message: message.text == "🚫 Без продаж")
 def no_sales(message):
-    send_search_card(
+    send_real_vacancies(
         message,
-        "🚫 Поиск без активных продаж",
+        "🚫 Без продаж",
         "менеджер аналитик -продажи -холодные -звонки -клиенты"
     )
 
 
 @bot.message_handler(func=lambda message: message.text == "❓ Помощь")
 def help_button(message):
-    help_command(message)
+    bot.send_message(
+        message.chat.id,
+        "Нажми кнопку ниже или напиши:\n/search менеджер по закупкам",
+        reply_markup=main_keyboard()
+    )
 
 
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
     bot.send_message(
         message.chat.id,
-        "Я понимаю команды и кнопки.\n\n"
-        "Нажми кнопку ниже или напиши:\n"
-        "/search менеджер по закупкам",
+        "Нажми кнопку ниже или напиши:\n/search менеджер по закупкам",
         reply_markup=main_keyboard()
     )
 
