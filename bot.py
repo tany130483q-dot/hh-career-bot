@@ -567,13 +567,35 @@ def unknown(message):
     )
 
 
-bot.remove_webhook()
-time.sleep(2)
+def run_bot():
+    while True:
+        try:
+            print("Бот запускается...")
 
-print("Бот запущен")
+            try:
+                bot.remove_webhook()
+                time.sleep(5)
+            except Exception as error:
+                print("REMOVE WEBHOOK ERROR:", error)
 
-bot.infinity_polling(
-    timeout=60,
-    long_polling_timeout=60,
-    allowed_updates=["message", "callback_query"]
-)
+            bot.infinity_polling(
+                timeout=60,
+                long_polling_timeout=60,
+                allowed_updates=["message", "callback_query"],
+                skip_pending=True
+            )
+
+        except Exception as error:
+            error_text = str(error)
+
+            print("BOT ERROR:", error_text)
+
+            if "409" in error_text or "Conflict" in error_text:
+                print("409 Conflict. Жду 30 секунд и пробую снова...")
+                time.sleep(30)
+            else:
+                print("Другая ошибка. Жду 10 секунд и пробую снова...")
+                time.sleep(10)
+
+
+run_bot()
