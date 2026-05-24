@@ -28,15 +28,14 @@ BAD_WORDS_COMMON = [
     "склад", "кладовщик", "комплектовщик", "курьер", "водитель",
     "бизнес-аналитик", "бизнес аналитик", "business analyst",
     "system analyst", "системный аналитик", "системного аналитика", "системная аналитика",
-    "английский", "английского", "english", "upper-intermediate", "intermediate", "b1", "b2", "c1", "c2",
+    "английский", "английского", "english",
+    "upper-intermediate", "intermediate", "b1", "b2", "c1", "c2",
 ]
-
 
 BAD_WORDS_TOVARODVIZHENIE = [
     "закупщик", "закупкам", "закупок", "закупки",
     "снабжение", "снабженец", "поставщик", "поставщиками",
 ]
-
 
 GOOD_WORDS_BY_CATEGORY = {
     "Закупки": ["закуп", "снабжен", "поставщик", "procurement", "buyer"],
@@ -111,7 +110,9 @@ def is_good_vacancy(vacancy, category):
             if bad_word in title:
                 return False
 
-    for good_word in GOOD_WORDS_BY_CATEGORY.get(category, []):
+    good_words = GOOD_WORDS_BY_CATEGORY.get(category, [])
+
+    for good_word in good_words:
         if good_word in title:
             return True
 
@@ -122,7 +123,11 @@ def get_vacancies_from_hh(query, category, mode="remote", limit=5):
     url = make_hh_link(query, mode=mode)
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+        ),
         "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
     }
 
@@ -146,10 +151,10 @@ def get_vacancies_from_hh(query, category, mode="remote", limit=5):
         vacancy = {
             "id": str(uuid.uuid4())[:8],
             "title": title_tag.get_text(strip=True),
-            "link": title_tag.get("href", ""),
             "company": company_tag.get_text(strip=True) if company_tag else "Компания не указана",
             "salary": salary_tag.get_text(strip=True) if salary_tag else "Зарплата не указана",
             "address": address_tag.get_text(strip=True) if address_tag else "Город не указан",
+            "link": title_tag.get("href", ""),
         }
 
         if is_good_vacancy(vacancy, category):
@@ -169,22 +174,25 @@ def send_vacancy_card(chat_id, vacancy):
         f"📌 {vacancy['title']}\n\n"
         f"🏢 {vacancy['company']}\n"
         f"💰 {vacancy['salary']}\n"
-        f"📍 {vacancy['address']}\n\n"
-        f"🔗 {vacancy['link']}"
+        f"📍 {vacancy['address']}"
     )
 
     keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(types.InlineKeyboardButton("Открыть вакансию", url=vacancy["link"]))
-    keyboard.add(types.InlineKeyboardButton("⭐ Сохранить вакансию", callback_data=f"save:{vacancy_id}"))
+    keyboard.add(types.InlineKeyboardButton("🔗 Открыть вакансию", url=vacancy["link"]))
+    keyboard.add(types.InlineKeyboardButton("⭐ Сохранить вакансию", callback_data=f"save_{vacancy_id}"))
 
-    bot.send_message(chat_id, text, reply_markup=keyboard)
+    bot.send_message(
+        chat_id,
+        text,
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("save:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
 def save_vacancy_callback(call):
     user_id = call.from_user.id
-    vacancy_id = call.data.split(":")[1]
-
+    vacancy_id = call.data.replace("save_", "")
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
@@ -197,12 +205,12 @@ def save_vacancy_callback(call):
     already_saved = any(item["link"] == vacancy["link"] for item in USER_FAVORITES[user_id])
 
     if already_saved:
-        bot.answer_callback_query(call.id, "Уже есть в избранном ⭐")
+        bot.answer_callback_query(call.id, "Уже сохранена ⭐")
         return
 
     USER_FAVORITES[user_id].append(vacancy)
 
-    bot.answer_callback_query(call.id, "Сохранено в избранное ⭐")
+    bot.answer_callback_query(call.id, "Сохранено ⭐")
 
     bot.send_message(
         call.message.chat.id,
@@ -230,18 +238,22 @@ def show_favorites(message):
     )
 
     for vacancy in favorites:
-        keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(types.InlineKeyboardButton("Открыть вакансию", url=vacancy["link"]))
-
         text = (
             f"📌 {vacancy['title']}\n\n"
             f"🏢 {vacancy['company']}\n"
             f"💰 {vacancy['salary']}\n"
-            f"📍 {vacancy['address']}\n\n"
-            f"🔗 {vacancy['link']}"
+            f"📍 {vacancy['address']}"
         )
 
-        bot.send_message(message.chat.id, text, reply_markup=keyboard)
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton("🔗 Открыть вакансию", url=vacancy["link"]))
+
+        bot.send_message(
+            message.chat.id,
+            text,
+            reply_markup=keyboard,
+            disable_web_page_preview=True
+        )
 
 
 def send_fallback_links(message, title, query):
@@ -314,7 +326,11 @@ def manual_search(message):
     query = message.text.replace("/search", "").strip()
 
     if not query:
-        bot.send_message(message.chat.id, "Пример:\n/search менеджер по закупкам", reply_markup=main_keyboard())
+        bot.send_message(
+            message.chat.id,
+            "Пример:\n/search менеджер по закупкам",
+            reply_markup=main_keyboard()
+        )
         return
 
     send_real_vacancies(message, "🔎 Ручной поиск", query, "Аналитик")
@@ -359,14 +375,22 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Нажми направление, затем под вакансией нажми ⭐ Сохранить вакансию.",
+        "Нажми направление, затем под карточкой нажми ⭐ Сохранить вакансию.",
         reply_markup=main_keyboard()
     )
 
 
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
-    bot.send_message(message.chat.id, "Используй кнопки ниже 👇", reply_markup=main_keyboard())
+    bot.send_message(
+        message.chat.id,
+        "Используй кнопки ниже 👇",
+        reply_markup=main_keyboard()
+    )
 
 
-bot.infinity_polling(timeout=60, long_polling_timeout=60)
+bot.infinity_polling(
+    timeout=60,
+    long_polling_timeout=60,
+    allowed_updates=["message", "callback_query"]
+)
