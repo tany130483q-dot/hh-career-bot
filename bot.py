@@ -20,36 +20,58 @@ VACANCY_STORAGE = {}
 
 BAD_WORDS_COMMON = [
     "маркетплейс", "маркетплейсов", "wildberries", "wb", "ozon", "яндекс маркет",
+
     "стажер", "стажёр", "помощник", "ассистент",
+
     "продажи", "продаж", "менеджер по продажам", "продавец",
     "клиентами", "клиентов", "по работе с клиентами",
+
     "оператор", "контакт-центр", "call-центр", "колл-центр",
+
     "недвижимость", "кредит", "кредитный", "лизинг", "страхование",
+
     "склад", "кладовщик", "комплектовщик", "курьер", "водитель",
+
     "бизнес-аналитик", "бизнес аналитик", "business analyst",
-    "system analyst", "системный аналитик", "системного аналитика", "системная аналитика",
+    "system analyst", "системный аналитик", "системного аналитика",
+    "системная аналитика",
+
+    "финансовый аналитик", "финансовая аналитика", "финансовый",
+    "1с", "1c", "middle", "senior",
+    "методология", "методолог", "методологии",
+
+    "автомобиль", "автомобилей", "авто", "автоаукцион", "байер",
+
     "английский", "английского", "english",
+    "китайский", "китайского", "chinese",
+
     "upper-intermediate", "intermediate", "b1", "b2", "c1", "c2",
 ]
+
 
 BAD_WORDS_TOVARODVIZHENIE = [
     "закупщик", "закупкам", "закупок", "закупки",
     "снабжение", "снабженец", "поставщик", "поставщиками",
 ]
 
+
 GOOD_WORDS_BY_CATEGORY = {
-    "Закупки": ["закуп", "снабжен", "поставщик", "procurement", "buyer"],
+    "Закупки": [
+        "закуп", "снабжен", "поставщик", "procurement", "buyer"
+    ],
     "Товародвижение": [
         "товародвиж", "товарное движение", "движение товара",
         "планирование поставок", "планирование товарных запасов",
-        "inventory", "replenishment", "demand planning", "supply chain",
+        "inventory", "replenishment", "demand planning", "supply chain"
     ],
     "Аналитик": [
-        "аналитик", "аналитика", "аналитик закуп", "аналитик ассортимента",
-        "аналитик товар", "товарный аналитик", "inventory analyst", "demand analyst",
+        "аналитик закуп", "аналитик ассортимента",
+        "аналитик товар", "товарный аналитик",
+        "аналитик по товар", "inventory analyst", "demand analyst"
     ],
     "Категорийный менеджер": [
-        "категорий", "category", "категорийный менеджер", "ассортимент", "category manager",
+        "категорий", "category", "категорийный менеджер",
+        "ассортимент", "category manager"
     ],
 }
 
@@ -58,7 +80,7 @@ def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
     keyboard.row("📊 Аналитик", "🗂 Категорийный менеджер")
-    keyboard.row("🔥 Лучшие сегодня", "🚫 Без продаж")
+    keyboard.row("🔥 Лучшие сегодня", "🏠 Только удаленка")
     keyboard.row("⭐ Избранное", "❓ Помощь")
     return keyboard
 
@@ -226,7 +248,7 @@ def show_favorites(message):
     if not favorites:
         bot.send_message(
             message.chat.id,
-            "⭐ Избранное пока пустое.\n\nСначала нажми кнопку ⭐ Сохранить вакансию под карточкой.",
+            "⭐ Избранное пока пустое.\n\nСначала нажми ⭐ Сохранить вакансию под карточкой.",
             reply_markup=main_keyboard()
         )
         return
@@ -256,13 +278,15 @@ def show_favorites(message):
         )
 
 
-def send_fallback_links(message, title, query):
-    remote_link = make_hh_link(query, mode="remote")
-    hybrid_link = make_hh_link(query, mode="hybrid_spb")
-
+def send_fallback_links(message, title, query, only_remote=False):
     keyboard = types.InlineKeyboardMarkup()
+
+    remote_link = make_hh_link(query, mode="remote")
     keyboard.add(types.InlineKeyboardButton("🏠 Удаленные вакансии", url=remote_link))
-    keyboard.add(types.InlineKeyboardButton("🏢 Гибрид СПБ", url=hybrid_link))
+
+    if not only_remote:
+        hybrid_link = make_hh_link(query, mode="hybrid_spb")
+        keyboard.add(types.InlineKeyboardButton("🏢 Гибрид СПБ", url=hybrid_link))
 
     bot.send_message(
         message.chat.id,
@@ -271,7 +295,7 @@ def send_fallback_links(message, title, query):
     )
 
 
-def send_real_vacancies(message, title, query, category):
+def send_real_vacancies(message, title, query, category, only_remote=False):
     bot.send_message(
         message.chat.id,
         f"{title}\n\nИщу вакансии и применяю фильтр...",
@@ -280,10 +304,12 @@ def send_real_vacancies(message, title, query, category):
 
     found_any = False
 
-    for mode_title, mode in [
-        ("🏠 Удаленка — все города", "remote"),
-        ("🏢 Гибрид — Санкт-Петербург", "hybrid_spb"),
-    ]:
+    search_modes = [("🏠 Удаленка — все города", "remote")]
+
+    if not only_remote:
+        search_modes.append(("🏢 Гибрид — Санкт-Петербург", "hybrid_spb"))
+
+    for mode_title, mode in search_modes:
         bot.send_message(message.chat.id, mode_title)
 
         try:
@@ -301,14 +327,34 @@ def send_real_vacancies(message, title, query, category):
             continue
 
     if not found_any:
-        send_fallback_links(message, title, query)
+        send_fallback_links(message, title, query, only_remote=only_remote)
 
 
 def send_best_today(message):
+    bot.send_message(
+        message.chat.id,
+        "🔥 Лучшие сегодня\n\n"
+        "Исключаю авто, финансы, 1С, бизнес/системную аналитику и вакансии с английским/китайским.",
+        reply_markup=main_keyboard()
+    )
+
     send_real_vacancies(message, "🔎 Закупки", "менеджер по закупкам", "Закупки")
     send_real_vacancies(message, "📦 Товародвижение", "товародвижение", "Товародвижение")
     send_real_vacancies(message, "📊 Аналитик", "аналитик закупок", "Аналитик")
     send_real_vacancies(message, "🗂 Категорийный менеджер", "категорийный менеджер", "Категорийный менеджер")
+
+
+def send_only_remote(message):
+    bot.send_message(
+        message.chat.id,
+        "🏠 Только удаленка\n\nИщу только удаленные вакансии по всем направлениям.",
+        reply_markup=main_keyboard()
+    )
+
+    send_real_vacancies(message, "🔎 Закупки — удаленно", "менеджер по закупкам", "Закупки", only_remote=True)
+    send_real_vacancies(message, "📦 Товародвижение — удаленно", "товародвижение", "Товародвижение", only_remote=True)
+    send_real_vacancies(message, "📊 Аналитик — удаленно", "аналитик закупок", "Аналитик", only_remote=True)
+    send_real_vacancies(message, "🗂 Категорийный менеджер — удаленно", "категорийный менеджер", "Категорийный менеджер", only_remote=True)
 
 
 @bot.message_handler(commands=["start"])
@@ -361,9 +407,9 @@ def best_today(message):
     send_best_today(message)
 
 
-@bot.message_handler(func=lambda message: message.text == "🚫 Без продаж")
-def no_sales(message):
-    send_real_vacancies(message, "🚫 Без продаж", "аналитик закупок", "Аналитик")
+@bot.message_handler(func=lambda message: message.text == "🏠 Только удаленка")
+def only_remote(message):
+    send_only_remote(message)
 
 
 @bot.message_handler(func=lambda message: message.text == "⭐ Избранное")
