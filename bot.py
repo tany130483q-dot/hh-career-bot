@@ -1,14 +1,15 @@
 import telebot
 from telebot import types
 import requests
+import json
 import time
-import os
+import threading
 
-TOKEN = os.environ.get("BOT_TOKEN")
+TOKEN = "8878670055:AAFzmS9p8yfP1NZA7pxhTe-bpZjcGUQkp88"
+
+SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwf3UPzjUZIzLsn64wluSEMBp3uRA91sIEWwz6104WzSKRSy5OajIBuDLTb3hGB21Ui/exec"
 
 bot = telebot.TeleBot(TOKEN)
-
-API_URL = "https://script.google.com/macros/s/AKfycbxaueWV_fKu2NtI1xqJ_L2HJgE7NkISl4bTFlBNiFfzuyA19vFKCt9nvxZheT8ZZXaleg/exec"
 
 # =========================
 # КНОПКИ
@@ -18,6 +19,7 @@ def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
     markup.row("🔔 Включить рассылку", "🔕 Выключить рассылку")
+
     markup.row("🔎 Закупки", "📦 Товародвижение")
     markup.row("📊 Аналитик", "🗂 Категорийный менеджер")
     markup.row("🔥 Лучшие сегодня", "🏠 Только удаленка")
@@ -25,124 +27,131 @@ def main_keyboard():
 
     return markup
 
+
 # =========================
-# СТАРТ
+# ПОДПИСКА
 # =========================
 
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(
         message.chat.id,
-        "Привет 👋\n\nЯ карьерный ассистент Татьяны.",
+        "Привет 👋\nЯ карьерный ассистент Татьяны.",
         reply_markup=main_keyboard()
     )
 
-# =========================
-# ВКЛЮЧИТЬ РАССЫЛКУ
-# =========================
 
-@bot.message_handler(func=lambda message: message.text == "🔔 Включить рассылку")
-def enable_subscription(message):
-
-    try:
-        response = requests.get(
-            API_URL,
-            params={
-                "action": "add",
-                "chat_id": message.chat.id
-            },
-            timeout=10
-        )
-
-        text = response.text.strip()
-
-        if text == "already_exists":
-            bot.send_message(
-                message.chat.id,
-                "⚠️ Рассылка уже включена."
-            )
-        else:
-            bot.send_message(
-                message.chat.id,
-                "🔔 Рассылка включена.\n\nКаждый день в 10:00 буду присылать вакансии."
-            )
-
-    except Exception as e:
-        bot.send_message(
-            message.chat.id,
-            f"Ошибка подключения:\n{e}"
-        )
-
-# =========================
-# ВЫКЛЮЧИТЬ РАССЫЛКУ
-# =========================
-
-@bot.message_handler(func=lambda message: message.text == "🔕 Выключить рассылку")
-def disable_subscription(message):
+@bot.message_handler(func=lambda m: m.text == "🔔 Включить рассылку")
+def subscribe(message):
+    chat_id = message.chat.id
 
     try:
         requests.get(
-            API_URL,
+            SCRIPT_URL,
             params={
-                "action": "remove",
-                "chat_id": message.chat.id
+                "action": "add",
+                "chat_id": chat_id
             },
             timeout=10
         )
 
         bot.send_message(
-            message.chat.id,
-            "🔕 Рассылка выключена."
+            chat_id,
+            "🔔 Рассылка включена.\n\nКаждый день в 10:00 по Москве буду присылать вакансии."
         )
 
     except Exception as e:
-        bot.send_message(
-            message.chat.id,
-            f"Ошибка подключения:\n{e}"
+        bot.send_message(chat_id, f"Ошибка подписки:\n{e}")
+
+
+@bot.message_handler(func=lambda m: m.text == "🔕 Выключить рассылку")
+def unsubscribe(message):
+    chat_id = message.chat.id
+
+    try:
+        requests.get(
+            SCRIPT_URL,
+            params={
+                "action": "remove",
+                "chat_id": chat_id
+            },
+            timeout=10
         )
 
+        bot.send_message(chat_id, "🔕 Рассылка выключена.")
+
+    except Exception as e:
+        bot.send_message(chat_id, f"Ошибка отписки:\n{e}")
+
+
 # =========================
-# ПРОЧИЕ КНОПКИ
+# КНОПКИ ФИЛЬТРОВ
 # =========================
 
-@bot.message_handler(func=lambda message: True)
+@bot.message_handler(func=lambda m: True)
 def buttons(message):
-
     text = message.text
 
-    if text == "🔎 Закупки":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+    responses = {
+        "🔎 Закупки": "Показываю вакансии по закупкам.",
+        "📦 Товародвижение": "Показываю вакансии по товародвижению.",
+        "📊 Аналитик": "Показываю вакансии аналитика.",
+        "🗂 Категорийный менеджер": "Показываю вакансии категорийного менеджера.",
+        "🔥 Лучшие сегодня": "Показываю лучшие вакансии за сегодня.",
+        "🏠 Только удаленка": "Показываю только удаленные вакансии.",
+        "💰 Зарплата 150k+": "Показываю вакансии с зарплатой 150k+.",
+        "⭐ Избранное": "Тут будут избранные вакансии."
+    }
 
-    elif text == "📦 Товародвижение":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+    if text in responses:
+        bot.send_message(message.chat.id, responses[text])
 
-    elif text == "📊 Аналитик":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
 
-    elif text == "🗂 Категорийный менеджер":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+# =========================
+# РАССЫЛКА
+# =========================
 
-    elif text == "🔥 Лучшие сегодня":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+def mailing_loop():
+    while True:
+        try:
+            now = time.localtime()
 
-    elif text == "🏠 Только удаленка":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+            # 10:00 по Москве
+            if now.tm_hour == 10 and now.tm_min == 0:
 
-    elif text == "💰 Зарплата 150k+":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+                response = requests.get(
+                    SCRIPT_URL,
+                    params={"action": "list"},
+                    timeout=10
+                )
 
-    elif text == "⭐ Избранное":
-        bot.send_message(message.chat.id, "Пока раздел в разработке.")
+                subscribers = response.json()
+
+                for chat_id in subscribers:
+                    try:
+                        bot.send_message(
+                            chat_id,
+                            "🔥 Новые вакансии уже ждут тебя!"
+                        )
+
+                    except:
+                        pass
+
+                time.sleep(60)
+
+            time.sleep(20)
+
+        except Exception as e:
+            print("Ошибка рассылки:", e)
+            time.sleep(30)
+
 
 # =========================
 # ЗАПУСК
 # =========================
 
-while True:
-    try:
-        print("BOT STARTED")
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+threading.Thread(target=mailing_loop).start()
 
-    except Exception as e:
-        print(f"ERROR: {e}")
-        time.sleep(5)
+print("Бот запущен")
+
+bot.infinity_polling()
