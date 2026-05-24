@@ -1,4 +1,5 @@
 pyTelegramBotAPI
 requests
-gspread
-oauth2client
+beautifulsoup4
+lxml
+schedule
