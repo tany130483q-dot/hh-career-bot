@@ -1,7 +1,6 @@
 import telebot
 from telebot import types
 import requests
-import json
 import os
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -45,9 +44,10 @@ def get_vacancies(text=""):
 # =========================================
 
 def save_favorite(chat_id, vacancy):
+
     params = {
         "action": "save_favorite",
-        "chat_id": chat_id,
+        "chat_id": str(chat_id),
         "title": vacancy["title"],
         "company": vacancy["company"],
         "salary": vacancy["salary"],
@@ -55,13 +55,16 @@ def save_favorite(chat_id, vacancy):
         "link": vacancy["link"]
     }
 
-    requests.get(GOOGLE_SCRIPT_URL, params=params)
+    response = requests.get(GOOGLE_SCRIPT_URL, params=params)
+
+    return response.text
 
 
 def get_favorites(chat_id):
+
     params = {
         "action": "get_favorites",
-        "chat_id": chat_id
+        "chat_id": str(chat_id)
     }
 
     response = requests.get(GOOGLE_SCRIPT_URL, params=params)
@@ -73,7 +76,7 @@ def get_favorites(chat_id):
 
 
 # =========================================
-# КНОПКИ
+# KEYBOARD
 # =========================================
 
 def main_keyboard():
@@ -94,6 +97,7 @@ def main_keyboard():
 
 @bot.message_handler(commands=["start"])
 def start(message):
+
     bot.send_message(
         message.chat.id,
         "Привет 👋\nЯ карьерный ассистент Татьяны.",
@@ -102,57 +106,58 @@ def start(message):
 
 
 # =========================================
-# РАССЫЛКА
+# SUBSCRIPTIONS
 # =========================================
 
 @bot.message_handler(func=lambda m: m.text == "🔔 Включить рассылку")
 def enable_sub(message):
-    chat_id = message.chat.id
 
     requests.get(
         GOOGLE_SCRIPT_URL,
         params={
             "action": "add",
-            "chat_id": chat_id
+            "chat_id": message.chat.id
         }
     )
 
     bot.send_message(
-        chat_id,
-        "🔔 Рассылка включена.\nКаждый день в 10:00 по Москве буду присылать вакансии."
+        message.chat.id,
+        "🔔 Рассылка включена."
     )
 
 
 @bot.message_handler(func=lambda m: m.text == "📌 Выключить рассылку")
 def disable_sub(message):
-    chat_id = message.chat.id
 
     requests.get(
         GOOGLE_SCRIPT_URL,
         params={
             "action": "remove",
-            "chat_id": chat_id
+            "chat_id": message.chat.id
         }
     )
 
-    bot.send_message(chat_id, "📌 Рассылка выключена.")
+    bot.send_message(
+        message.chat.id,
+        "📌 Рассылка выключена."
+    )
 
 
 # =========================================
-# ИЗБРАННОЕ
+# FAVORITES
 # =========================================
 
 @bot.message_handler(func=lambda m: m.text == "⭐ Избранное")
-def show_favorites(message):
-    chat_id = message.chat.id
+def favorites(message):
 
-    favorites = get_favorites(chat_id)
+    items = get_favorites(message.chat.id)
 
-    if not favorites:
-        bot.send_message(chat_id, "Избранного пока нет.")
+    if not items:
+        bot.send_message(message.chat.id, "Избранного пока нет.")
         return
 
-    for item in favorites:
+    for item in items:
+
         text = f"""
 ⭐ <b>{item['title']}</b>
 
@@ -164,7 +169,7 @@ def show_favorites(message):
 """
 
         bot.send_message(
-            chat_id,
+            message.chat.id,
             text,
             parse_mode="HTML",
             disable_web_page_preview=True
@@ -172,10 +177,11 @@ def show_favorites(message):
 
 
 # =========================================
-# ВАКАНСИИ
+# SEND VACANCIES
 # =========================================
 
 def send_vacancies(chat_id, query):
+
     vacancies = get_vacancies(query)
 
     if not vacancies:
@@ -187,6 +193,7 @@ def send_vacancies(chat_id, query):
         salary = "Не указана"
 
         if vac.get("salary"):
+
             s = vac["salary"]
 
             frm = s.get("from")
@@ -195,8 +202,10 @@ def send_vacancies(chat_id, query):
 
             if frm and to:
                 salary = f"{frm} - {to} {cur}"
+
             elif frm:
                 salary = f"от {frm} {cur}"
+
             elif to:
                 salary = f"до {to} {cur}"
 
@@ -209,7 +218,7 @@ def send_vacancies(chat_id, query):
         }
 
         text = f"""
-<b>{vacancy_data['title']}</b>
+📌 <b>{vacancy_data['title']}</b>
 
 🏢 {vacancy_data['company']}
 💰 {vacancy_data['salary']}
@@ -220,14 +229,14 @@ def send_vacancies(chat_id, query):
 
         keyboard = types.InlineKeyboardMarkup()
 
-        save_btn = types.InlineKeyboardButton(
-            "⭐ Сохранить",
+        btn = types.InlineKeyboardButton(
+            "⭐ Сохранить вакансию",
             callback_data=f"save_{vac['id']}"
         )
 
-        keyboard.add(save_btn)
+        keyboard.add(btn)
 
-        favorites_memory[vac["id"]] = vacancy_data
+        favorites_memory[str(vac["id"])] = vacancy_data
 
         bot.send_message(
             chat_id,
@@ -239,67 +248,72 @@ def send_vacancies(chat_id, query):
 
 
 # =========================================
-# CALLBACK
+# CALLBACK SAVE
 # =========================================
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
 def save_callback(call):
+
     vacancy_id = call.data.replace("save_", "")
 
     vacancy = favorites_memory.get(vacancy_id)
 
-    if vacancy:
-        save_favorite(call.message.chat.id, vacancy)
-
+    if not vacancy:
         bot.answer_callback_query(
             call.id,
-            "Вакансия сохранена ⭐"
+            "Ошибка: вакансия потерялась"
         )
+        return
+
+    result = save_favorite(call.message.chat.id, vacancy)
+
+    bot.answer_callback_query(
+        call.id,
+        f"Ответ таблицы: {result}"
+    )
+
+    bot.send_message(
+        call.message.chat.id,
+        f"⭐ Результат сохранения:\n{result}"
+    )
 
 
 # =========================================
-# КНОПКИ ПОИСКА
+# BUTTONS
 # =========================================
 
 @bot.message_handler(func=lambda m: m.text == "🔎 Закупки")
 def zakupki(message):
-    bot.send_message(message.chat.id, "Показываю вакансии по закупкам.")
     send_vacancies(message.chat.id, "специалист по закупкам")
 
 
 @bot.message_handler(func=lambda m: m.text == "📦 Товародвижение")
 def move(message):
-    bot.send_message(message.chat.id, "Показываю вакансии по товародвижению.")
     send_vacancies(message.chat.id, "товародвижение")
 
 
 @bot.message_handler(func=lambda m: m.text == "📊 Аналитик")
 def analyst(message):
-    bot.send_message(message.chat.id, "Показываю вакансии аналитика.")
     send_vacancies(message.chat.id, "аналитик")
 
 
 @bot.message_handler(func=lambda m: m.text == "📁 Категорийный менеджер")
 def category(message):
-    bot.send_message(message.chat.id, "Показываю вакансии категорийного менеджера.")
     send_vacancies(message.chat.id, "категорийный менеджер")
 
 
 @bot.message_handler(func=lambda m: m.text == "🔥 Лучшие сегодня")
 def best(message):
-    bot.send_message(message.chat.id, "Показываю лучшие вакансии.")
     send_vacancies(message.chat.id, "middle senior")
 
 
 @bot.message_handler(func=lambda m: m.text == "🏠 Только удаленка")
 def remote(message):
-    bot.send_message(message.chat.id, "Показываю удаленные вакансии.")
     send_vacancies(message.chat.id, "удаленная работа")
 
 
 @bot.message_handler(func=lambda m: m.text == "💰 Зарплата 150k+")
 def salary(message):
-    bot.send_message(message.chat.id, "Показываю вакансии с зарплатой 150k+.")
     send_vacancies(message.chat.id, "150000")
 
 
