@@ -51,7 +51,9 @@ BAD_WORDS_TOVARODVIZHENIE = [
 ]
 
 GOOD_WORDS_BY_CATEGORY = {
-    "Закупки": ["закуп", "снабжен", "поставщик", "procurement", "buyer"],
+    "Закупки": [
+        "закуп", "снабжен", "поставщик", "procurement", "buyer"
+    ],
     "Товародвижение": [
         "товародвиж", "товарное движение", "движение товара",
         "планирование поставок", "планирование товарных запасов",
@@ -62,19 +64,22 @@ GOOD_WORDS_BY_CATEGORY = {
         "товарный аналитик", "аналитик по товар", "inventory analyst", "demand analyst"
     ],
     "Категорийный менеджер": [
-        "категорий", "category", "категорийный менеджер", "ассортимент", "category manager"
+        "категорий", "category", "категорийный менеджер",
+        "ассортимент", "category manager"
     ],
 }
 
 
 def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+
     keyboard.row("🔎 Закупки", "📦 Товародвижение")
     keyboard.row("📊 Аналитик", "🗂 Категорийный менеджер")
     keyboard.row("🔥 Лучшие сегодня", "🏠 Только удаленка")
     keyboard.row("💰 Зарплата 150k+", "⭐ Избранное")
     keyboard.row("🔔 Включить рассылку", "🔕 Выключить рассылку")
     keyboard.row("❓ Помощь")
+
     return keyboard
 
 
@@ -230,15 +235,30 @@ def call_ai(prompt):
             json={
                 "model": OPENAI_MODEL,
                 "messages": [
-                    {"role": "system", "content": "Ты карьерный ассистент. Отвечай кратко, по делу, на русском языке."},
-                    {"role": "user", "content": prompt},
+                    {
+                        "role": "system",
+                        "content": "Ты карьерный ассистент. Отвечай кратко, по делу, на русском языке."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    },
                 ],
                 "temperature": 0.4,
+                "max_tokens": 700,
             },
-            timeout=40,
+            timeout=60,
         )
 
         data = response.json()
+
+        if response.status_code != 200:
+            error_message = data.get("error", {}).get("message", str(data))
+            return f"Ошибка OpenAI API:\n{error_message}"
+
+        if "choices" not in data:
+            return f"Ошибка OpenAI API: нет поля choices.\nОтвет сервера:\n{str(data)[:1000]}"
+
         return data["choices"][0]["message"]["content"]
 
     except Exception as error:
@@ -266,6 +286,7 @@ def save_favorite_to_sheet(chat_id, vacancy):
         "link": vacancy["link"],
         "status": "сохранено",
     })
+
     return response.text.strip()
 
 
@@ -287,6 +308,7 @@ def delete_favorite_from_sheet(chat_id, link):
         "chat_id": str(chat_id),
         "link": link,
     })
+
     return response.text.strip()
 
 
@@ -297,19 +319,29 @@ def update_status_in_sheet(chat_id, link, status):
         "link": link,
         "status": status,
     })
+
     return response.text.strip()
 
 
 def add_subscriber(chat_id):
-    google_get({"action": "add", "chat_id": str(chat_id)})
+    google_get({
+        "action": "add",
+        "chat_id": str(chat_id)
+    })
 
 
 def remove_subscriber(chat_id):
-    google_get({"action": "remove", "chat_id": str(chat_id)})
+    google_get({
+        "action": "remove",
+        "chat_id": str(chat_id)
+    })
 
 
 def get_subscribers():
-    response = google_get({"action": "list"})
+    response = google_get({
+        "action": "list"
+    })
+
     try:
         return response.json()
     except Exception:
@@ -334,36 +366,109 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
         text += f"\n📍 Статус: {status}"
 
     keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(types.InlineKeyboardButton("🔗 Открыть вакансию", url=vacancy["link"]))
+
+    keyboard.add(
+        types.InlineKeyboardButton(
+            "🔗 Открыть вакансию",
+            url=vacancy["link"]
+        )
+    )
 
     if from_favorites:
-        keyboard.add(types.InlineKeyboardButton("🟢 Откликнулась", callback_data=f"status_applied_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("🔴 Отказ", callback_data=f"status_rejected_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("⚫ Не подходит", callback_data=f"status_bad_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("🗑 Удалить", callback_data=f"delete_{vacancy_id}"))
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "🟢 Откликнулась",
+                callback_data=f"status_applied_{vacancy_id}"
+            )
+        )
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "🔴 Отказ",
+                callback_data=f"status_rejected_{vacancy_id}"
+            )
+        )
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "⚫ Не подходит",
+                callback_data=f"status_bad_{vacancy_id}"
+            )
+        )
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "🗑 Удалить",
+                callback_data=f"delete_{vacancy_id}"
+            )
+        )
     else:
-        keyboard.add(types.InlineKeyboardButton("⭐ Сохранить", callback_data=f"save_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("🤖 AI-анализ", callback_data=f"ai_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("💰 AI-зарплата", callback_data=f"salary_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("✉️ Сопроводительное", callback_data=f"cover_{vacancy_id}"))
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "⭐ Сохранить",
+                callback_data=f"save_{vacancy_id}"
+            )
+        )
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "🤖 AI-анализ",
+                callback_data=f"ai_{vacancy_id}"
+            )
+        )
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "💰 AI-зарплата",
+                callback_data=f"salary_{vacancy_id}"
+            )
+        )
+        keyboard.add(
+            types.InlineKeyboardButton(
+                "✉️ Сопроводительное",
+                callback_data=f"cover_{vacancy_id}"
+            )
+        )
 
-    bot.send_message(chat_id, text, reply_markup=keyboard, disable_web_page_preview=True)
+    bot.send_message(
+        chat_id,
+        text,
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
 
 
-def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, only_remote=False):
-    bot.send_message(chat_id, f"{title}\n\n💰 Зарплата от {salary:,} ₽", reply_markup=main_keyboard())
+def send_real_vacancies(
+    chat_id,
+    title,
+    query,
+    category,
+    salary=CURRENT_SALARY,
+    only_remote=False
+):
+    bot.send_message(
+        chat_id,
+        f"{title}\n\n💰 Зарплата от {salary:,} ₽",
+        reply_markup=main_keyboard()
+    )
 
     found_any = False
-    search_modes = [("🏠 Удаленка — все города", "remote")]
+
+    search_modes = [
+        ("🏠 Удаленка — все города", "remote")
+    ]
 
     if not only_remote:
-        search_modes.append(("🏢 Гибрид — Санкт-Петербург", "hybrid_spb"))
+        search_modes.append(
+            ("🏢 Гибрид — Санкт-Петербург", "hybrid_spb")
+        )
 
     for mode_title, mode in search_modes:
         bot.send_message(chat_id, mode_title)
 
         try:
-            vacancies = get_vacancies_from_hh(query, category, salary, mode, limit=3)
+            vacancies = get_vacancies_from_hh(
+                query=query,
+                category=category,
+                salary=salary,
+                mode=mode,
+                limit=3
+            )
 
             if not vacancies:
                 continue
@@ -377,7 +482,11 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
             print("HH ERROR:", error)
 
     if not found_any:
-        bot.send_message(chat_id, "❌ Подходящих вакансий не найдено.", reply_markup=main_keyboard())
+        bot.send_message(
+            chat_id,
+            "❌ Подходящих вакансий не найдено.",
+            reply_markup=main_keyboard()
+        )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
@@ -386,19 +495,37 @@ def save_callback(call):
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия устарела. Запусти поиск заново.")
+        bot.answer_callback_query(
+            call.id,
+            "Вакансия устарела. Запусти поиск заново."
+        )
         return
 
     result = save_favorite_to_sheet(call.message.chat.id, vacancy)
 
     if result == "favorite_saved":
         bot.answer_callback_query(call.id, "Сохранено ⭐")
-        bot.send_message(call.message.chat.id, f"⭐ Сохранила:\n\n📌 {vacancy['title']}", reply_markup=main_keyboard())
+        bot.send_message(
+            call.message.chat.id,
+            f"⭐ Сохранила:\n\n📌 {vacancy['title']}",
+            reply_markup=main_keyboard()
+        )
+
     elif result == "already_saved":
-        bot.answer_callback_query(call.id, "Уже есть в избранном ⭐")
+        bot.answer_callback_query(
+            call.id,
+            "Уже есть в избранном ⭐"
+        )
+
     else:
-        bot.answer_callback_query(call.id, "Ошибка сохранения")
-        bot.send_message(call.message.chat.id, f"⚠️ Ответ таблицы: {result}")
+        bot.answer_callback_query(
+            call.id,
+            "Ошибка сохранения"
+        )
+        bot.send_message(
+            call.message.chat.id,
+            f"⚠️ Ответ таблицы: {result}"
+        )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("delete_"))
@@ -407,24 +534,43 @@ def delete_callback(call):
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
+        bot.answer_callback_query(
+            call.id,
+            "Вакансия не найдена."
+        )
         return
 
-    result = delete_favorite_from_sheet(call.message.chat.id, vacancy["link"])
+    result = delete_favorite_from_sheet(
+        call.message.chat.id,
+        vacancy["link"]
+    )
+
     bot.answer_callback_query(call.id, "Удалено 🗑")
-    bot.send_message(call.message.chat.id, f"🗑 Удалила из избранного:\n\n{vacancy['title']}\n\nОтвет: {result}")
+
+    bot.send_message(
+        call.message.chat.id,
+        f"🗑 Удалила из избранного:\n\n{vacancy['title']}\n\nОтвет: {result}"
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("status_"))
 def status_callback(call):
     parts = call.data.split("_")
+
+    if len(parts) < 3:
+        bot.answer_callback_query(call.id, "Ошибка статуса.")
+        return
+
     status_code = parts[1]
     vacancy_id = parts[2]
 
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
+        bot.answer_callback_query(
+            call.id,
+            "Вакансия не найдена."
+        )
         return
 
     statuses = {
@@ -434,10 +580,19 @@ def status_callback(call):
     }
 
     status = statuses.get(status_code, "сохранено")
-    result = update_status_in_sheet(call.message.chat.id, vacancy["link"], status)
+
+    result = update_status_in_sheet(
+        call.message.chat.id,
+        vacancy["link"],
+        status
+    )
 
     bot.answer_callback_query(call.id, "Статус обновлен")
-    bot.send_message(call.message.chat.id, f"✅ Статус: {status}\n\nОтвет: {result}")
+
+    bot.send_message(
+        call.message.chat.id,
+        f"✅ Статус: {status}\n\nОтвет: {result}"
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ai_"))
@@ -446,18 +601,33 @@ def ai_callback(call):
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
+        bot.answer_callback_query(
+            call.id,
+            "Вакансия не найдена."
+        )
         return
 
-    bot.answer_callback_query(call.id, "Делаю анализ...")
+    bot.answer_callback_query(
+        call.id,
+        "Делаю анализ..."
+    )
+
     answer = call_ai(
-        "Оцени вакансию для Татьяны. Опыт: закупки, товародвижение, аналитика, категорийный менеджмент. "
-        "Не подходит: продажи, колл-центры, бизнес/системная аналитика, английский/китайский. "
-        "Дай кратко: подходит/не подходит, плюсы, риски, стоит ли откликаться.\n\n"
+        "Оцени вакансию для Татьяны.\n"
+        "Опыт: закупки, товародвижение, аналитика, категорийный менеджмент.\n"
+        "Не подходят: продажи, колл-центры, бизнес/системная аналитика, английский/китайский.\n"
+        "Дай кратко:\n"
+        "1. Подходит или нет\n"
+        "2. Плюсы\n"
+        "3. Риски\n"
+        "4. Стоит ли откликаться\n\n"
         + vacancy_text(vacancy)
     )
 
-    bot.send_message(call.message.chat.id, f"🤖 AI-анализ:\n\n{answer}")
+    bot.send_message(
+        call.message.chat.id,
+        f"🤖 AI-анализ:\n\n{answer}"
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("salary_"))
@@ -466,17 +636,29 @@ def salary_callback(call):
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
+        bot.answer_callback_query(
+            call.id,
+            "Вакансия не найдена."
+        )
         return
 
-    bot.answer_callback_query(call.id, "Оцениваю зарплату...")
+    bot.answer_callback_query(
+        call.id,
+        "Оцениваю зарплату..."
+    )
+
     answer = call_ai(
-        "Оцени зарплату по вакансии. Скажи кратко: низкая, нормальная или высокая для роли. "
-        "Учитывай цель дохода 100–150k+ рублей. Дай рекомендацию.\n\n"
+        "Оцени зарплату по вакансии.\n"
+        "Скажи кратко: низкая, нормальная или высокая для роли.\n"
+        "Учитывай цель дохода 100–150k+ рублей.\n"
+        "Дай рекомендацию, стоит ли откликаться.\n\n"
         + vacancy_text(vacancy)
     )
 
-    bot.send_message(call.message.chat.id, f"💰 AI-оценка зарплаты:\n\n{answer}")
+    bot.send_message(
+        call.message.chat.id,
+        f"💰 AI-оценка зарплаты:\n\n{answer}"
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cover_"))
@@ -485,27 +667,46 @@ def cover_callback(call):
     vacancy = VACANCY_STORAGE.get(vacancy_id)
 
     if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
+        bot.answer_callback_query(
+            call.id,
+            "Вакансия не найдена."
+        )
         return
 
-    bot.answer_callback_query(call.id, "Пишу сопроводительное...")
+    bot.answer_callback_query(
+        call.id,
+        "Пишу сопроводительное..."
+    )
+
     answer = call_ai(
-        "Напиши короткое сопроводительное письмо на русском языке. "
-        "Стиль: уверенно, коротко, без воды. Опыт: закупки, товародвижение, аналитика, Excel, 1C/ERP, контроль остатков, поставки.\n\n"
+        "Напиши короткое сопроводительное письмо на русском языке.\n"
+        "Стиль: уверенно, коротко, без воды.\n"
+        "Опыт: закупки, товародвижение, аналитика, Excel, 1C/ERP, контроль остатков, поставки.\n\n"
         + vacancy_text(vacancy)
     )
 
-    bot.send_message(call.message.chat.id, f"✉️ Сопроводительное:\n\n{answer}")
+    bot.send_message(
+        call.message.chat.id,
+        f"✉️ Сопроводительное:\n\n{answer}"
+    )
 
 
 def show_favorites(message):
     favorites = get_favorites_from_sheet(message.chat.id)
 
     if not favorites:
-        bot.send_message(message.chat.id, "⭐ Избранное пока пустое.", reply_markup=main_keyboard())
+        bot.send_message(
+            message.chat.id,
+            "⭐ Избранное пока пустое.",
+            reply_markup=main_keyboard()
+        )
         return
 
-    bot.send_message(message.chat.id, f"⭐ Избранные вакансии: {len(favorites)}", reply_markup=main_keyboard())
+    bot.send_message(
+        message.chat.id,
+        f"⭐ Избранные вакансии: {len(favorites)}",
+        reply_markup=main_keyboard()
+    )
 
     for item in favorites:
         vacancy = {
@@ -517,15 +718,48 @@ def show_favorites(message):
             "link": item.get("link", ""),
             "status": item.get("status", "сохранено"),
         }
-        send_vacancy_card(message.chat.id, vacancy, from_favorites=True)
+
+        send_vacancy_card(
+            message.chat.id,
+            vacancy,
+            from_favorites=True
+        )
 
 
 def send_daily_jobs_to_chat(chat_id):
-    bot.send_message(chat_id, "🔔 Ежедневная подборка вакансий", reply_markup=main_keyboard())
-    send_real_vacancies(chat_id, "🔎 Закупки", "менеджер по закупкам", "Закупки")
-    send_real_vacancies(chat_id, "📦 Товародвижение", "товародвижение", "Товародвижение")
-    send_real_vacancies(chat_id, "📊 Аналитик", "аналитик закупок", "Аналитик")
-    send_real_vacancies(chat_id, "🗂 Категорийный менеджер", "категорийный менеджер", "Категорийный менеджер")
+    bot.send_message(
+        chat_id,
+        "🔔 Ежедневная подборка вакансий",
+        reply_markup=main_keyboard()
+    )
+
+    send_real_vacancies(
+        chat_id,
+        "🔎 Закупки",
+        "менеджер по закупкам",
+        "Закупки"
+    )
+
+    send_real_vacancies(
+        chat_id,
+        "📦 Товародвижение",
+        "товародвижение",
+        "Товародвижение"
+    )
+
+    send_real_vacancies(
+        chat_id,
+        "📊 Аналитик",
+        "аналитик закупок",
+        "Аналитик"
+    )
+
+    send_real_vacancies(
+        chat_id,
+        "🗂 Категорийный менеджер",
+        "категорийный менеджер",
+        "Категорийный менеджер"
+    )
 
 
 def daily_jobs():
@@ -545,7 +779,11 @@ def scheduler_loop():
 
 
 schedule.every().day.at("07:00").do(daily_jobs)
-threading.Thread(target=scheduler_loop, daemon=True).start()
+
+threading.Thread(
+    target=scheduler_loop,
+    daemon=True
+).start()
 
 
 @bot.message_handler(commands=["start"])
@@ -561,33 +799,63 @@ def start(message):
 @bot.message_handler(func=lambda message: message.text == "🔔 Включить рассылку")
 def enable_notifications(message):
     add_subscriber(message.chat.id)
-    bot.send_message(message.chat.id, "🔔 Рассылка включена. Каждый день в 10:00 по Москве.", reply_markup=main_keyboard())
+
+    bot.send_message(
+        message.chat.id,
+        "🔔 Рассылка включена. Каждый день в 10:00 по Москве.",
+        reply_markup=main_keyboard()
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "🔕 Выключить рассылку")
 def disable_notifications(message):
     remove_subscriber(message.chat.id)
-    bot.send_message(message.chat.id, "🔕 Рассылка выключена.", reply_markup=main_keyboard())
+
+    bot.send_message(
+        message.chat.id,
+        "🔕 Рассылка выключена.",
+        reply_markup=main_keyboard()
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "🔎 Закупки")
 def purchases(message):
-    send_real_vacancies(message.chat.id, "🔎 Закупки", "менеджер по закупкам", "Закупки")
+    send_real_vacancies(
+        message.chat.id,
+        "🔎 Закупки",
+        "менеджер по закупкам",
+        "Закупки"
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "📦 Товародвижение")
 def goods_movement(message):
-    send_real_vacancies(message.chat.id, "📦 Товародвижение", "товародвижение", "Товародвижение")
+    send_real_vacancies(
+        message.chat.id,
+        "📦 Товародвижение",
+        "товародвижение",
+        "Товародвижение"
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "📊 Аналитик")
 def analyst(message):
-    send_real_vacancies(message.chat.id, "📊 Аналитик", "аналитик закупок", "Аналитик")
+    send_real_vacancies(
+        message.chat.id,
+        "📊 Аналитик",
+        "аналитик закупок",
+        "Аналитик"
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "🗂 Категорийный менеджер")
 def category_manager(message):
-    send_real_vacancies(message.chat.id, "🗂 Категорийный менеджер", "категорийный менеджер", "Категорийный менеджер")
+    send_real_vacancies(
+        message.chat.id,
+        "🗂 Категорийный менеджер",
+        "категорийный менеджер",
+        "Категорийный менеджер"
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "🔥 Лучшие сегодня")
@@ -597,15 +865,48 @@ def best_today(message):
 
 @bot.message_handler(func=lambda message: message.text == "🏠 Только удаленка")
 def only_remote(message):
-    send_real_vacancies(message.chat.id, "🏠 Только удаленка", "менеджер по закупкам", "Закупки", only_remote=True)
+    send_real_vacancies(
+        message.chat.id,
+        "🏠 Только удаленка",
+        "менеджер по закупкам",
+        "Закупки",
+        only_remote=True
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "💰 Зарплата 150k+")
 def salary_150(message):
-    send_real_vacancies(message.chat.id, "🔎 Закупки 150k+", "менеджер по закупкам", "Закупки", salary=150000)
-    send_real_vacancies(message.chat.id, "📦 Товародвижение 150k+", "товародвижение", "Товародвижение", salary=150000)
-    send_real_vacancies(message.chat.id, "📊 Аналитик 150k+", "аналитик закупок", "Аналитик", salary=150000)
-    send_real_vacancies(message.chat.id, "🗂 Категорийный менеджер 150k+", "категорийный менеджер", "Категорийный менеджер", salary=150000)
+    send_real_vacancies(
+        message.chat.id,
+        "🔎 Закупки 150k+",
+        "менеджер по закупкам",
+        "Закупки",
+        salary=150000
+    )
+
+    send_real_vacancies(
+        message.chat.id,
+        "📦 Товародвижение 150k+",
+        "товародвижение",
+        "Товародвижение",
+        salary=150000
+    )
+
+    send_real_vacancies(
+        message.chat.id,
+        "📊 Аналитик 150k+",
+        "аналитик закупок",
+        "Аналитик",
+        salary=150000
+    )
+
+    send_real_vacancies(
+        message.chat.id,
+        "🗂 Категорийный менеджер 150k+",
+        "категорийный менеджер",
+        "Категорийный менеджер",
+        salary=150000
+    )
 
 
 @bot.message_handler(func=lambda message: message.text == "⭐ Избранное")
@@ -615,12 +916,20 @@ def favorites(message):
 
 @bot.message_handler(func=lambda message: message.text == "❓ Помощь")
 def help_button(message):
-    bot.send_message(message.chat.id, "Выбери направление, сохрани вакансию или нажми AI-кнопки под карточкой.", reply_markup=main_keyboard())
+    bot.send_message(
+        message.chat.id,
+        "Выбери направление, сохрани вакансию или нажми AI-кнопки под карточкой.",
+        reply_markup=main_keyboard()
+    )
 
 
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
-    bot.send_message(message.chat.id, "Используй кнопки ниже 👇", reply_markup=main_keyboard())
+    bot.send_message(
+        message.chat.id,
+        "Используй кнопки ниже 👇",
+        reply_markup=main_keyboard()
+    )
 
 
 def run_bot():
