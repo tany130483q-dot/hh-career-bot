@@ -6,6 +6,7 @@ import threading
 import schedule
 import requests
 import telebot
+
 from bs4 import BeautifulSoup
 from telebot import types
 from urllib.parse import quote
@@ -64,12 +65,10 @@ BAD_WORDS_COMMON = [
     "upper-intermediate", "intermediate", "b1", "b2", "c1", "c2",
 ]
 
-
 BAD_WORDS_TOVARODVIZHENIE = [
     "закупщик", "закупкам", "закупок", "закупки",
     "снабжение", "снабженец", "поставщик", "поставщиками",
 ]
-
 
 GOOD_WORDS_BY_CATEGORY = {
     "Закупки": [
@@ -397,7 +396,7 @@ def scheduler_loop():
         time.sleep(30)
 
 
-schedule.every().day.at("10:00").do(daily_jobs)
+schedule.every().day.at("07:00").do(daily_jobs)
 threading.Thread(target=scheduler_loop, daemon=True).start()
 
 
@@ -407,6 +406,30 @@ def start(message):
         message.chat.id,
         "Бот работает ✅\n\n"
         "Можно искать вакансии, сохранять избранное и включить ежедневную рассылку.",
+        reply_markup=main_keyboard()
+    )
+
+
+@bot.message_handler(commands=["subscribe"])
+def subscribe_command(message):
+    SUBSCRIBERS.add(message.chat.id)
+    save_subscribers()
+
+    bot.send_message(
+        message.chat.id,
+        "🔔 Рассылка включена.\n\nКаждый день в 10:00 по Москве буду присылать вакансии.",
+        reply_markup=main_keyboard()
+    )
+
+
+@bot.message_handler(commands=["unsubscribe"])
+def unsubscribe_command(message):
+    SUBSCRIBERS.discard(message.chat.id)
+    save_subscribers()
+
+    bot.send_message(
+        message.chat.id,
+        "🔕 Рассылка выключена.",
         reply_markup=main_keyboard()
     )
 
@@ -433,7 +456,7 @@ def enable_notifications(message):
 
     bot.send_message(
         message.chat.id,
-        "🔔 Рассылка включена.\n\nКаждый день в 10:00 буду присылать вакансии.",
+        "🔔 Рассылка включена.\n\nКаждый день в 10:00 по Москве буду присылать вакансии.",
         reply_markup=main_keyboard()
     )
 
@@ -516,6 +539,9 @@ def unknown(message):
         reply_markup=main_keyboard()
     )
 
+
+bot.remove_webhook()
+time.sleep(2)
 
 bot.infinity_polling(
     timeout=60,
