@@ -111,13 +111,9 @@ def make_hh_link(query, salary=100000, mode="remote"):
 
 
 def google_get(params):
-    try:
-        response = requests.get(SCRIPT_URL, params=params, timeout=30)
-        print("GOOGLE RESPONSE:", response.text[:500])
-        return response
-    except Exception as error:
-        print("GOOGLE ERROR:", error)
-        raise
+    response = requests.get(SCRIPT_URL, params=params, timeout=30)
+    print("GOOGLE RESPONSE:", response.text[:500])
+    return response
 
 
 def test_google_connection():
@@ -320,6 +316,18 @@ def make_cover_letter(vacancy):
     )
 
 
+def make_full_ai_pack(vacancy):
+    ai_analysis = make_ai_analysis(vacancy)
+    time.sleep(1)
+
+    ai_salary = make_ai_salary(vacancy)
+    time.sleep(1)
+
+    cover_letter = make_cover_letter(vacancy)
+
+    return ai_analysis, ai_salary, cover_letter
+
+
 def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="найдена"):
     response = google_get({
         "action": "save_vacancy_full",
@@ -446,9 +454,6 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
         keyboard.add(types.InlineKeyboardButton("🗑 Удалить", callback_data=f"delete_{vacancy_id}"))
     else:
         keyboard.add(types.InlineKeyboardButton("⭐ Сохранить", callback_data=f"save_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("🤖 AI-анализ", callback_data=f"ai_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("💰 AI-зарплата", callback_data=f"salary_{vacancy_id}"))
-        keyboard.add(types.InlineKeyboardButton("✉️ Сопроводительное", callback_data=f"cover_{vacancy_id}"))
 
     bot.send_message(chat_id, text, reply_markup=keyboard, disable_web_page_preview=True)
 
@@ -474,8 +479,18 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
             found_any = True
 
             for vacancy in vacancies:
-                sheet_result = save_vacancy_full_to_sheet(vacancy, status="найдена")
-                print("SHEET SAVE:", sheet_result)
+                bot.send_message(chat_id, f"🤖 Анализирую и сохраняю в таблицу:\n{vacancy['title']}")
+
+                ai_analysis, ai_salary, cover_letter = make_full_ai_pack(vacancy)
+
+                save_vacancy_full_to_sheet(
+                    vacancy,
+                    ai_analysis=ai_analysis,
+                    ai_salary=ai_salary,
+                    cover_letter=cover_letter,
+                    status="AI готов"
+                )
+
                 send_vacancy_card(chat_id, vacancy)
 
         except Exception as error:
@@ -553,54 +568,6 @@ def status_callback(call):
     bot.send_message(call.message.chat.id, f"✅ Статус: {status}\n\nОтвет: {result}")
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("ai_"))
-def ai_callback(call):
-    vacancy_id = call.data.replace("ai_", "")
-    vacancy = VACANCY_STORAGE.get(vacancy_id)
-
-    if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
-        return
-
-    bot.answer_callback_query(call.id, "Делаю анализ...")
-    answer = make_ai_analysis(vacancy)
-    save_vacancy_full_to_sheet(vacancy, ai_analysis=answer, status="проанализирована")
-
-    bot.send_message(call.message.chat.id, f"🤖 AI-анализ:\n\n{answer}")
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("salary_"))
-def salary_callback(call):
-    vacancy_id = call.data.replace("salary_", "")
-    vacancy = VACANCY_STORAGE.get(vacancy_id)
-
-    if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
-        return
-
-    bot.answer_callback_query(call.id, "Оцениваю зарплату...")
-    answer = make_ai_salary(vacancy)
-    save_vacancy_full_to_sheet(vacancy, ai_salary=answer, status="зарплата оценена")
-
-    bot.send_message(call.message.chat.id, f"💰 AI-оценка зарплаты:\n\n{answer}")
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cover_"))
-def cover_callback(call):
-    vacancy_id = call.data.replace("cover_", "")
-    vacancy = VACANCY_STORAGE.get(vacancy_id)
-
-    if not vacancy:
-        bot.answer_callback_query(call.id, "Вакансия не найдена.")
-        return
-
-    bot.answer_callback_query(call.id, "Пишу сопроводительное...")
-    answer = make_cover_letter(vacancy)
-    save_vacancy_full_to_sheet(vacancy, cover_letter=answer, status="письмо готово")
-
-    bot.send_message(call.message.chat.id, f"✉️ Сопроводительное:\n\n{answer}")
-
-
 def show_favorites(message):
     favorites = get_favorites_from_sheet(message.chat.id)
 
@@ -661,7 +628,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.2: вакансии сохраняются в Google Sheets.\n"
+        "v1.3: AI-анализ, AI-зарплата и сопроводительное автоматически сохраняются в Google Sheets.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
