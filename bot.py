@@ -12,7 +12,7 @@ from urllib.parse import quote
 from datetime import datetime
 
 
-TOKEN = os.getenv("8878670055:AAFzmS9p8yfP1NZA7pxhTe-bpZjcGUQkp88")
+TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
