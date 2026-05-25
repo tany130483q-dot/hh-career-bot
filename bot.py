@@ -111,8 +111,21 @@ def make_hh_link(query, salary=100000, mode="remote"):
 
 
 def google_get(params):
-    response = requests.get(SCRIPT_URL, params=params, timeout=30)
-    return response
+    try:
+        response = requests.get(SCRIPT_URL, params=params, timeout=30)
+        print("GOOGLE RESPONSE:", response.text[:500])
+        return response
+    except Exception as error:
+        print("GOOGLE ERROR:", error)
+        raise
+
+
+def test_google_connection():
+    try:
+        response = google_get({"action": "ping"})
+        return response.text.strip()
+    except Exception as error:
+        return f"error: {error}"
 
 
 def is_good_vacancy(vacancy, category):
@@ -169,13 +182,7 @@ def vacancy_score(vacancy, category):
         if bad_word in text:
             score -= 25
 
-    if score < 0:
-        score = 0
-
-    if score > 100:
-        score = 100
-
-    return score
+    return max(0, min(100, score))
 
 
 def get_vacancies_from_hh(query, category, salary, mode="remote", limit=3):
@@ -260,9 +267,6 @@ def call_ai(prompt):
             error_message = data.get("error", {}).get("message", str(data))
             return f"Ошибка OpenAI API:\n{error_message}"
 
-        if "choices" not in data:
-            return f"Ошибка OpenAI API: нет поля choices.\nОтвет сервера:\n{str(data)[:1000]}"
-
         return data["choices"][0]["message"]["content"]
 
     except Exception as error:
@@ -316,7 +320,7 @@ def make_cover_letter(vacancy):
     )
 
 
-def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="новая"):
+def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="найдена"):
     response = google_get({
         "action": "save_vacancy_full",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -333,7 +337,9 @@ def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_lett
         "status": status,
     })
 
-    return response.text.strip()
+    result = response.text.strip()
+    print("SAVE VACANCY RESULT:", result)
+    return result
 
 
 def save_favorite_to_sheet(chat_id, vacancy):
@@ -468,11 +474,13 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
             found_any = True
 
             for vacancy in vacancies:
-                save_vacancy_full_to_sheet(vacancy, status="найдена")
+                sheet_result = save_vacancy_full_to_sheet(vacancy, status="найдена")
+                print("SHEET SAVE:", sheet_result)
                 send_vacancy_card(chat_id, vacancy)
 
         except Exception as error:
             print("HH ERROR:", error)
+            bot.send_message(chat_id, f"⚠️ Ошибка поиска/записи:\n{error}")
 
     if not found_any:
         bot.send_message(chat_id, "❌ Подходящих вакансий не найдено.", reply_markup=main_keyboard())
@@ -648,10 +656,13 @@ threading.Thread(target=scheduler_loop, daemon=True).start()
 
 @bot.message_handler(commands=["start"])
 def start(message):
+    google_status = test_google_connection()
+
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.1: вакансии сохраняются в Google Sheets вместе с AI-анализом, зарплатой и сопроводительным.",
+        "v1.2: вакансии сохраняются в Google Sheets.\n"
+        f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
 
