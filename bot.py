@@ -27,6 +27,33 @@ VACANCY_STORAGE = {}
 CURRENT_SALARY = 100000
 
 
+RESUME_PROFILES = {
+    "Закупки": """
+Резюме под закупки:
+Менеджер по закупкам. Опыт: закупки, товарные запасы, работа с поставщиками, 1С:ERP, аналитика продаж, управление ассортиментом.
+Релевантные факты: Рив Гош — менеджер по закупкам, контроль товарного запаса, анализ остатков, продаж и оборачиваемости, работа с отчетностью в 1С, оптимизация закупок.
+Ле Муррр — ассортиментная матрица 5000+ SKU, ABC/XYZ, снижение низкооборачиваемых товаров с 8% до 4%, сокращение избыточных закупок на 17%.
+SKL Group — анализ остатков и движения ТМЦ по 5 складам, автоматизация отчетности.
+""",
+    "Товародвижение": """
+Резюме под товародвижение:
+Менеджер по товародвижению. Опыт: движение ТМЦ, товарный учет, остатки, перемещения, логистика, склады, 1С/ERP, Excel.
+Релевантные факты: SKL Group — анализ товарных остатков и движения ТМЦ по 5 складам, контроль корректности товарного учета и товародвижения, анализ потерь и избыточных запасов, взаимодействие с логистикой и складами.
+Результат: автоматизация отчетности с 2 недель до 10 минут.
+""",
+    "Аналитик": """
+Резюме под аналитику:
+Аналитик товарных запасов / коммерческий аналитик. Опыт: ABC/XYZ-анализ, SKU-аналитика, анализ продаж, маржинальности, оборачиваемости, Excel, XLOOKUP/ВПР, сводные таблицы, 1С:ERP, DocsVision.
+Релевантные факты: ассортимент 5000+ SKU, снижение неликвидов, оптимизация товарных запасов, автоматизация отчетности, коммерческая аналитика.
+""",
+    "Категорийный менеджер": """
+Резюме под категорийного менеджера:
+Категорийный менеджер / менеджер по планированию. Опыт: ассортиментная матрица 5000+ SKU, анализ продаж, маржинальности, оборачиваемости, контроль неликвидов, ABC/XYZ, оптимизация закупок и товарного планирования.
+Результаты: снижение низкооборачиваемых товаров с 8% до 4%, сокращение избыточных закупок на 17%.
+"""
+}
+
+
 BAD_WORDS_COMMON = [
     "маркетплейс", "маркетплейсов", "wildberries", "wb", "ozon", "яндекс маркет",
     "стажер", "стажёр", "помощник", "ассистент",
@@ -38,7 +65,7 @@ BAD_WORDS_COMMON = [
     "бизнес-аналитик", "бизнес аналитик", "business analyst",
     "system analyst", "системный аналитик", "системного аналитика", "системная аналитика",
     "финансовый аналитик", "финансовая аналитика", "финансовый",
-    "1с", "1c", "middle", "senior",
+    "1с-программист", "разработчик 1с", "middle", "senior",
     "методология", "методолог", "методологии",
     "автомобиль", "автомобилей", "авто", "автоаукцион", "байер",
     "английский", "английского", "english",
@@ -124,6 +151,28 @@ def test_google_connection():
         return f"error: {error}"
 
 
+def detect_work_format(mode, vacancy):
+    text = (
+        vacancy.get("title", "") + " " +
+        vacancy.get("address", "") + " " +
+        vacancy.get("company", "")
+    ).lower()
+
+    if mode == "remote":
+        return "удалённо"
+
+    if mode == "hybrid_spb":
+        return "гибрид, Санкт-Петербург"
+
+    if "удален" in text or "remote" in text:
+        return "удалённо"
+
+    if "гибрид" in text:
+        return "гибрид"
+
+    return "не указан"
+
+
 def is_good_vacancy(vacancy, category):
     full_text = (
         vacancy.get("title", "") + " " +
@@ -156,7 +205,8 @@ def vacancy_score(vacancy, category):
         vacancy.get("title", "") + " " +
         vacancy.get("company", "") + " " +
         vacancy.get("salary", "") + " " +
-        vacancy.get("address", "")
+        vacancy.get("address", "") + " " +
+        vacancy.get("work_format", "")
     ).lower()
 
     score = 50
@@ -165,11 +215,11 @@ def vacancy_score(vacancy, category):
         if good_word in title:
             score += 10
 
-    if "удален" in text or "remote" in text:
-        score += 8
+    if "удал" in text:
+        score += 12
 
     if "гибрид" in text:
-        score += 5
+        score += 8
 
     if "150" in text or "160" in text or "170" in text or "180" in text or "200" in text:
         score += 10
@@ -220,6 +270,8 @@ def get_vacancies_from_hh(query, category, salary, mode="remote", limit=3):
             "category": category,
         }
 
+        vacancy["work_format"] = detect_work_format(mode, vacancy)
+
         if is_good_vacancy(vacancy, category):
             vacancy["ai_score"] = vacancy_score(vacancy, category)
             vacancies.append(vacancy)
@@ -244,14 +296,14 @@ def call_ai(prompt):
                 "messages": [
                     {
                         "role": "system",
-                        "content": "Ты карьерный ассистент. Отвечай кратко, практично, по-русски, без шаблонных фраз."
+                        "content": "Ты карьерный ассистент. Пиши по-русски, коротко, практично, без шаблонов и без AI-стиля."
                     },
                     {
                         "role": "user",
                         "content": prompt
                     },
                 ],
-                "temperature": 0.4,
+                "temperature": 0.35,
                 "max_tokens": 700,
             },
             timeout=60,
@@ -269,49 +321,72 @@ def call_ai(prompt):
         return f"Ошибка AI-запроса: {error}"
 
 
+def get_resume_profile(category):
+    return RESUME_PROFILES.get(category, RESUME_PROFILES["Аналитик"])
+
+
 def vacancy_text(vacancy):
     return (
         f"Название: {vacancy.get('title')}\n"
         f"Компания: {vacancy.get('company')}\n"
         f"Зарплата: {vacancy.get('salary')}\n"
-        f"Город/формат: {vacancy.get('address')}\n"
+        f"Город: {vacancy.get('address')}\n"
+        f"Формат работы: {vacancy.get('work_format')}\n"
         f"Категория: {vacancy.get('category')}\n"
         f"Ссылка: {vacancy.get('link')}"
     )
 
 
 def make_ai_analysis(vacancy):
+    resume = get_resume_profile(vacancy.get("category", ""))
+
     return call_ai(
-        "Оцени вакансию для Татьяны.\n"
-        "Опыт: закупки, товародвижение, аналитика, категорийный менеджмент.\n"
-        "Не подходят: продажи, колл-центры, бизнес/системная аналитика, английский/китайский.\n"
-        "Ответь кратко:\n"
-        "1. Подходит или нет\n"
-        "2. Почему\n"
-        "3. Риски\n"
-        "4. Стоит ли откликаться\n\n"
+        "Проанализируй вакансию для кандидата.\n\n"
+        f"{resume}\n\n"
+        "Задача:\n"
+        "1. Подходит ли вакансия кандидату.\n"
+        "2. Какие ключевые совпадения с резюме.\n"
+        "3. Какие риски: продажи, холодные звонки, английский, системная аналитика, офис.\n"
+        "4. Стоит ли откликаться.\n"
+        "Ответ коротко, без воды.\n\n"
+        "Вакансия:\n"
         + vacancy_text(vacancy)
     )
 
 
 def make_ai_salary(vacancy):
+    resume = get_resume_profile(vacancy.get("category", ""))
+
     return call_ai(
-        "Оцени зарплату по вакансии.\n"
-        "Скажи кратко: низкая, нормальная или высокая для роли.\n"
-        "Цель дохода 100–150k+ рублей.\n"
-        "Дай рекомендацию, стоит ли откликаться.\n\n"
+        "Оцени зарплату по вакансии.\n\n"
+        f"{resume}\n\n"
+        "Цель кандидата: 100–150k+ рублей.\n"
+        "Ответь кратко:\n"
+        "1. Зарплата ниже рынка / нормальная / хорошая.\n"
+        "2. Стоит ли откликаться.\n"
+        "3. Если зарплата не указана — какой диапазон можно ожидать.\n\n"
+        "Вакансия:\n"
         + vacancy_text(vacancy)
     )
 
 
 def make_cover_letter(vacancy):
+    resume = get_resume_profile(vacancy.get("category", ""))
+
     return call_ai(
-        "Напиши короткое сопроводительное письмо для hh.ru.\n"
-        "Важно: без фразы 'Уважаемые коллеги', без '[Ваше имя]', без воды, без шаблонности.\n"
-        "Длина: 4–6 строк.\n"
-        "Стиль: живой, уверенный, деловой.\n"
-        "Опыт кандидата: закупки, товародвижение, аналитика, Excel, 1C/ERP, контроль остатков, перемещения, поставки.\n"
-        "Письмо должно проходить ATS: используй ключевые слова из вакансии и релевантный опыт.\n\n"
+        "Напиши сопроводительное письмо для отклика на hh.ru.\n\n"
+        "ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:\n"
+        "- письмо должно выглядеть так, будто его написал живой человек, а не ИИ;\n"
+        "- без фраз: 'Уважаемые коллеги', 'Меня зовут', 'Я заинтересован', 'Буду рад стать частью команды', '[Ваше имя]';\n"
+        "- без длинного вступления;\n"
+        "- 4–6 коротких строк;\n"
+        "- деловой, спокойный, уверенный стиль;\n"
+        "- добавить ATS-ключи из вакансии естественно, без переспама;\n"
+        "- письмо должно отличаться под каждую вакансию;\n"
+        "- использовать только релевантный опыт из подходящего резюме;\n"
+        "- не выдумывать опыт.\n\n"
+        f"Подходящее резюме:\n{resume}\n\n"
+        "Вакансия:\n"
         + vacancy_text(vacancy)
     )
 
@@ -336,6 +411,7 @@ def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_lett
         "company": vacancy.get("company", ""),
         "salary": vacancy.get("salary", ""),
         "address": vacancy.get("address", ""),
+        "work_format": vacancy.get("work_format", ""),
         "link": vacancy.get("link", ""),
         "category": vacancy.get("category", ""),
         "ai_score": str(vacancy.get("ai_score", "")),
@@ -435,7 +511,8 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
         f"📌 {vacancy['title']}\n\n"
         f"🏢 {vacancy['company']}\n"
         f"💰 {vacancy['salary']}\n"
-        f"📍 {vacancy['address']}"
+        f"📍 {vacancy['address']}\n"
+        f"🏠 Формат: {vacancy.get('work_format', 'не указан')}"
     )
 
     if ai_score != "":
@@ -584,6 +661,7 @@ def show_favorites(message):
             "company": item.get("company", ""),
             "salary": item.get("salary", ""),
             "address": item.get("address", ""),
+            "work_format": item.get("work_format", ""),
             "link": item.get("link", ""),
             "status": item.get("status", "сохранено"),
             "category": "",
@@ -628,7 +706,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.3: AI-анализ, AI-зарплата и сопроводительное автоматически сохраняются в Google Sheets.\n"
+        "v1.4: добавлен формат работы и разные ATS-сопроводительные под разные резюме.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -693,7 +771,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Выбери направление. Вакансии и AI-данные автоматически сохраняются в Google Sheets.",
+        "Выбери направление. Бот сам подберёт резюме, сделает AI-анализ и сохранит всё в Google Sheets.",
         reply_markup=main_keyboard()
     )
 
