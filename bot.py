@@ -211,146 +211,144 @@ def vacancy_score(vacancy, category):
 
     return max(0, min(100, score))
 
-def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
 
-    url = "https://api.hh.ru/vacancies"
+def make_hh_urls(query, salary, only_remote=False):
+    encoded_query = quote(query)
 
-    params = {
-        "text": query,
-        "per_page": 30,
-        "order_by": "publication_time",
-        "period": 3
-    }
+    remote_url = (
+        "https://hh.ru/search/vacancy?"
+        f"text={encoded_query}"
+        f"&salary={salary}"
+        "&area=113"
+        "&ored_clusters=true"
+        "&enable_snippets=true"
+        "&order_by=publication_time"
+        "&search_period=3"
+        "&only_with_salary=true"
+        "&work_format=REMOTE"
+        "&search_field=name"
+        "&search_field=company_name"
+        "&search_field=description"
+    )
 
+    urls = [("удалённо", remote_url)]
+
+    if not only_remote:
+        hybrid_spb_url = (
+            "https://spb.hh.ru/search/vacancy?"
+            f"text={encoded_query}"
+            f"&salary={salary}"
+            "&area=2"
+            "&ored_clusters=true"
+            "&enable_snippets=true"
+            "&order_by=publication_time"
+            "&search_period=3"
+            "&only_with_salary=true"
+            "&work_format=HYBRID"
+            "&search_field=name"
+            "&search_field=company_name"
+            "&search_field=description"
+        )
+
+        urls.append(("гибрид", hybrid_spb_url))
+
+    return urls
+
+
+def parse_hh_page(url, category, work_format, limit):
     headers = {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
     }
 
-    response = requests.get(url, params=params, headers=headers)
+    response = requests.get(url, headers=headers, timeout=30)
 
     if response.status_code != 200:
-        print(f"Ошибка HH API: {response.status_code}")
+        print(f"HH PAGE ERROR: {response.status_code}")
         return []
 
-    data = response.json()
+    soup = BeautifulSoup(response.text, "lxml")
+    vacancy_blocks = soup.find_all("div", attrs={"data-qa": "vacancy-serp__vacancy"})
 
     vacancies = []
 
-    for item in data.get("items", []):
+    for block in vacancy_blocks:
+        try:
+            title_tag = block.find(attrs={"data-qa": "serp-item__title"})
+            if not title_tag:
+                continue
 
-        title = item.get("name", "")
-        company = item.get("employer", {}).get("name", "")
-        link = item.get("alternate_url", "")
-        address = item.get("area", {}).get("name", "")
-        published = item.get("published_at", "")
+            title = title_tag.get_text(strip=True)
+            link = title_tag.get("href", "").split("?")[0]
 
-        salary_data = item.get("salary")
+            if not link:
+                continue
 
-        if salary_data:
-            salary_from = salary_data.get("from")
-            salary_to = salary_data.get("to")
-            currency = salary_data.get("currency", "RUR")
+            if should_skip_vacancy(link):
+                continue
 
-            if salary_from and salary_to:
-                salary_text = f"{salary_from}-{salary_to} {currency}"
+            company_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-employer"})
+            company = company_tag.get_text(strip=True) if company_tag else "Компания не указана"
 
-            elif salary_from:
-                salary_text = f"от {salary_from} {currency}"
+            salary_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-compensation"})
+            salary_text = salary_tag.get_text(" ", strip=True) if salary_tag else "Зарплата не указана"
 
-            elif salary_to:
-                salary_text = f"до {salary_to} {currency}"
+            address_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-address"})
+            address = address_tag.get_text(" ", strip=True) if address_tag else "Город не указан"
 
-            else:
-                salary_text = "не указана"
+            if work_format == "гибрид":
+                address = "Санкт-Петербург"
 
-        else:
-            salary_text = "не указана"
+            vacancy = {
+                "id": str(uuid.uuid4())[:8],
+                "title": title,
+                "company": company,
+                "salary": salary_text,
+                "address": address,
+                "work_format": work_format,
+                "link": link,
+                "category": category,
+                "posted_time": "за последние 3 дня",
+            }
 
-        snippet = (
-            str(item.get("snippet", {}).get("requirement", "")) +
-            " " +
-            str(item.get("snippet", {}).get("responsibility", ""))
-        ).lower()
+            if is_good_vacancy(vacancy, category):
+                vacancy["ai_score"] = vacancy_score(vacancy, category)
+                vacancies.append(vacancy)
 
-        title_lower = title.lower()
-        address_lower = address.lower()
+            if len(vacancies) >= limit:
+                break
 
-        full_text = f"{title_lower} {snippet}"
+        except Exception as error:
+            print("PARSE VACANCY ERROR:", error)
 
-        # -------------------------
-        # ОПРЕДЕЛЯЕМ ФОРМАТ
-        # -------------------------
+    return vacancies
 
-        is_remote = any(word in full_text for word in [
-            "удален",
-            "удалён",
-            "remote",
-            "home office",
-            "работа из дома"
-        ])
 
-        is_hybrid = any(word in full_text for word in [
-            "гибрид",
-            "hybrid"
-        ])
+def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
+    all_vacancies = []
+    urls = make_hh_urls(query=query, salary=salary, only_remote=only_remote)
 
-        is_office = any(word in full_text for word in [
-            "офис",
-            "в офисе",
-            "офисный"
-        ])
-
-        # -------------------------
-        # ФИЛЬТР ГОРОДОВ
-        # -------------------------
-
-        is_spb = (
-            "санкт-петербург" in address_lower or
-            "спб" in address_lower
+    for work_format, url in urls:
+        vacancies = parse_hh_page(
+            url=url,
+            category=category,
+            work_format=work_format,
+            limit=limit
         )
 
-        # СПБ → гибрид/удаленка
-        if is_spb:
+        all_vacancies.extend(vacancies)
 
-            if not (is_remote or is_hybrid):
-                continue
+        if len(all_vacancies) >= limit:
+            break
 
-        # Остальные города → только удаленка
-        else:
+    all_vacancies.sort(key=lambda item: item.get("ai_score", 0), reverse=True)
+    return all_vacancies[:limit]
 
-            if not is_remote:
-                continue
 
-        # офис исключаем
-        if is_office and not is_remote:
-            continue
-
-        # -------------------------
-        # НАЗВАНИЕ ФОРМАТА
-        # -------------------------
-
-        if is_remote:
-            work_format = "удаленка"
-
-        elif is_hybrid:
-            work_format = "гибрид"
-
-        else:
-            work_format = "не указан"
-
-        vacancy = {
-            "title": title,
-            "company": company,
-            "salary": salary_text,
-            "address": address,
-            "link": link,
-            "work_format": work_format,
-            "published_at": published
-        }
-
-        vacancies.append(vacancy)
-
-    return vacancies[:limit]
 def call_ai(prompt):
     if not OPENAI_API_KEY:
         return "AI-функция пока не подключена. Добавь OPENAI_API_KEY в Render Environment Variables."
@@ -833,7 +831,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.6.3: поиск за 3 дня, СПБ гибрид/удалёнка, остальные города только удалёнка.\n"
+        "v1.6.4: стабильный поиск за 3 дня — удалёнка РФ + гибрид СПБ.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -898,7 +896,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Бот ищет свежие вакансии за 3 дня, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
+        "Бот ищет свежие вакансии за 3 дня: удалёнка по РФ + гибрид Санкт-Петербург.",
         reply_markup=main_keyboard()
     )
 
