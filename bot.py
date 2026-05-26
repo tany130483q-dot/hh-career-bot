@@ -94,6 +94,17 @@ GOOD_WORDS_BY_CATEGORY = {
     ],
 }
 
+SKIP_STATUSES = [
+    "новая",
+    "ai готов",
+    "сохранено",
+    "откликнулась",
+    "отказ",
+    "не подходит",
+    "собеседование",
+    "удалена",
+]
+
 
 def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -149,6 +160,28 @@ def test_google_connection():
         return response.text.strip()
     except Exception as error:
         return f"error: {error}"
+
+
+def get_vacancy_status(link):
+    try:
+        response = google_get({
+            "action": "get_vacancy_status",
+            "link": link
+        })
+        return response.text.strip().lower()
+    except Exception as error:
+        print("GET VACANCY STATUS ERROR:", error)
+        return "not_found"
+
+
+def should_skip_vacancy(link):
+    status = get_vacancy_status(link)
+
+    if status in SKIP_STATUSES:
+        print(f"SKIP VACANCY: {link} / status={status}")
+        return True
+
+    return False
 
 
 def detect_work_format(mode, vacancy):
@@ -271,6 +304,9 @@ def get_vacancies_from_hh(query, category, salary, mode="remote", limit=3):
         }
 
         vacancy["work_format"] = detect_work_format(mode, vacancy)
+
+        if should_skip_vacancy(vacancy["link"]):
+            continue
 
         if is_good_vacancy(vacancy, category):
             vacancy["ai_score"] = vacancy_score(vacancy, category)
@@ -436,7 +472,7 @@ def make_full_ai_pack(vacancy):
     return ai_analysis, ai_salary, cover_letter
 
 
-def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="найдена"):
+def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="новая"):
     response = google_get({
         "action": "save_vacancy_full",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -572,6 +608,7 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
     bot.send_message(chat_id, f"{title}\n\n💰 Зарплата от {salary:,} ₽", reply_markup=main_keyboard())
 
     found_any = False
+    skipped_count = 0
     search_modes = [("🏠 Удаленка — все города", "remote")]
 
     if not only_remote:
@@ -598,7 +635,7 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
                     ai_analysis=ai_analysis,
                     ai_salary=ai_salary,
                     cover_letter=cover_letter,
-                    status="AI готов"
+                    status="новая"
                 )
 
                 send_vacancy_card(chat_id, vacancy)
@@ -608,7 +645,11 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
             bot.send_message(chat_id, f"⚠️ Ошибка поиска/записи:\n{error}")
 
     if not found_any:
-        bot.send_message(chat_id, "❌ Подходящих вакансий не найдено.", reply_markup=main_keyboard())
+        bot.send_message(
+            chat_id,
+            "❌ Новых подходящих вакансий не найдено. Возможно, все свежие вакансии уже есть в таблице.",
+            reply_markup=main_keyboard()
+        )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
@@ -705,7 +746,7 @@ def show_favorites(message):
 
 
 def send_daily_jobs_to_chat(chat_id):
-    bot.send_message(chat_id, "🔔 Ежедневная подборка вакансий", reply_markup=main_keyboard())
+    bot.send_message(chat_id, "🔔 Ежедневная подборка новых вакансий", reply_markup=main_keyboard())
     send_real_vacancies(chat_id, "🔎 Закупки", "менеджер по закупкам", "Закупки")
     send_real_vacancies(chat_id, "📦 Товародвижение", "товародвижение", "Товародвижение")
     send_real_vacancies(chat_id, "📊 Аналитик", "аналитик закупок", "Аналитик")
@@ -739,7 +780,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.4: добавлен формат работы и разные ATS-сопроводительные под разные резюме.\n"
+        "v1.5: бот не присылает дубли и учитывает статусы вакансий.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -804,7 +845,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Выбери направление. Бот сам подберёт резюме, сделает AI-анализ и сохранит всё в Google Sheets.",
+        "Выбери направление. Бот покажет только новые вакансии и не будет присылать обработанные повторно.",
         reply_markup=main_keyboard()
     )
 
