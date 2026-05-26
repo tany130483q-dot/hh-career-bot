@@ -223,7 +223,7 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
         "&ored_clusters=true"
         "&enable_snippets=true"
         "&order_by=publication_time"
-        "&search_period=1"
+        "&search_period=3"
         "&only_with_salary=true"
     )
 
@@ -293,7 +293,7 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
             if only_remote and "удал" not in work_format_lower:
                 continue
 
-            posted_time = "за последние 24 часа"
+            posted_time = "за последние 3 дня"
 
             vacancy = {
                 "id": str(uuid.uuid4())[:8],
@@ -628,7 +628,7 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
 def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, only_remote=False):
     bot.send_message(
         chat_id,
-        f"{title}\n\n💰 Зарплата от {salary:,} ₽\n🕒 Только вакансии за последние 24 часа\n🏠 Другие города — только удалёнка\n🏢 Санкт-Петербург — гибрид или удалёнка",
+        f"{title}\n\n💰 Зарплата от {salary:,} ₽\n🕒 Только вакансии за последние 3 дня\n🏠 Другие города — только удалёнка\n🏢 Санкт-Петербург — гибрид или удалёнка",
         reply_markup=main_keyboard()
     )
 
@@ -669,7 +669,7 @@ def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, 
     if not found_any:
         bot.send_message(
             chat_id,
-            "❌ Новых подходящих вакансий за последние 24 часа не найдено.",
+            "❌ Новых подходящих вакансий за последние 3 дня не найдено.",
             reply_markup=main_keyboard()
         )
 
@@ -769,7 +769,7 @@ def show_favorites(message):
 
 
 def send_daily_jobs_to_chat(chat_id):
-    bot.send_message(chat_id, "🔔 Ежедневная подборка новых вакансий за 24 часа", reply_markup=main_keyboard())
+    bot.send_message(chat_id, "🔔 Ежедневная подборка новых вакансий за 3 дня", reply_markup=main_keyboard())
     send_real_vacancies(chat_id, "🔎 Закупки", "менеджер по закупкам", "Закупки")
     send_real_vacancies(chat_id, "📦 Товародвижение", "товародвижение", "Товародвижение")
     send_real_vacancies(chat_id, "📊 Аналитик", "аналитик закупок", "Аналитик")
@@ -803,7 +803,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.6.2: фильтр формата исправлен — СПБ гибрид/удалёнка, остальные города только удалёнка.\n"
+        "v1.6.3: поиск за 3 дня, СПБ гибрид/удалёнка, остальные города только удалёнка.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -868,7 +868,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Бот ищет свежие вакансии за 24 часа, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
+        "Бот ищет свежие вакансии за 3 дня, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
         reply_markup=main_keyboard()
     )
 
