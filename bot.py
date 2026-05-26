@@ -6,8 +6,10 @@ import schedule
 import requests
 import telebot
 
+from bs4 import BeautifulSoup
 from telebot import types
-from datetime import datetime, timezone
+from urllib.parse import quote
+from datetime import datetime
 
 
 TOKEN = os.getenv("BOT_TOKEN")
