@@ -6,10 +6,8 @@ import schedule
 import requests
 import telebot
 
-from bs4 import BeautifulSoup
 from telebot import types
-from urllib.parse import quote
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -25,6 +23,7 @@ SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwf3UPzjUZIzLsn64wluSEMBp3
 
 VACANCY_STORAGE = {}
 CURRENT_SALARY = 100000
+HH_API_URL = "https://api.hh.ru/vacancies"
 
 
 RESUME_PROFILES = {
@@ -117,37 +116,6 @@ def main_keyboard():
     return keyboard
 
 
-def make_hh_link(query, salary=100000, mode="remote"):
-    encoded_query = quote(query)
-
-    if mode == "remote":
-        return (
-            "https://hh.ru/search/vacancy"
-            f"?text={encoded_query}"
-            "&area=113"
-            f"&salary={salary}"
-            "&only_with_salary=true"
-            "&work_schedule_by_days=FIVE_ON_TWO_OFF"
-            "&work_format=REMOTE"
-            "&search_field=name"
-            "&search_field=company_name"
-            "&search_field=description"
-        )
-
-    return (
-        "https://spb.hh.ru/search/vacancy"
-        f"?text={encoded_query}"
-        "&area=2"
-        f"&salary={salary}"
-        "&only_with_salary=true"
-        "&work_schedule_by_days=FIVE_ON_TWO_OFF"
-        "&work_format=HYBRID"
-        "&search_field=name"
-        "&search_field=company_name"
-        "&search_field=description"
-    )
-
-
 def google_get(params):
     response = requests.get(SCRIPT_URL, params=params, timeout=30)
     print("GOOGLE RESPONSE:", response.text[:500])
@@ -184,18 +152,34 @@ def should_skip_vacancy(link):
     return False
 
 
-def detect_work_format(mode, vacancy):
-    text = (
-        vacancy.get("title", "") + " " +
-        vacancy.get("address", "") + " " +
-        vacancy.get("company", "")
-    ).lower()
+def detect_work_format_from_api(vacancy):
+    employment = vacancy.get("employment") or {}
+    schedule = vacancy.get("schedule") or {}
+    work_format = vacancy.get("work_format") or []
+    working_days = vacancy.get("working_days") or []
 
-    if mode == "remote":
-        return "удалённо"
+    parts = []
 
-    if mode == "hybrid_spb":
-        return "гибрид, Санкт-Петербург"
+    for item in work_format:
+        name = item.get("name")
+        if name:
+            parts.append(name)
+
+    if schedule.get("name"):
+        parts.append(schedule.get("name"))
+
+    for item in working_days:
+        name = item.get("name")
+        if name:
+            parts.append(name)
+
+    if employment.get("name"):
+        parts.append(employment.get("name"))
+
+    if not parts:
+        return "не указан"
+
+    text = ", ".join(parts).lower()
 
     if "удален" in text or "remote" in text:
         return "удалённо"
@@ -203,7 +187,30 @@ def detect_work_format(mode, vacancy):
     if "гибрид" in text:
         return "гибрид"
 
-    return "не указан"
+    if "полный день" in text:
+        return "офис / полный день"
+
+    return ", ".join(parts)
+
+
+def format_salary(salary):
+    if not salary:
+        return "Зарплата не указана"
+
+    salary_from = salary.get("from")
+    salary_to = salary.get("to")
+    currency = salary.get("currency") or ""
+
+    if salary_from and salary_to:
+        return f"{salary_from}–{salary_to} {currency}"
+
+    if salary_from:
+        return f"от {salary_from} {currency}"
+
+    if salary_to:
+        return f"до {salary_to} {currency}"
+
+    return "Зарплата не указана"
 
 
 def is_good_vacancy(vacancy, category):
@@ -211,7 +218,8 @@ def is_good_vacancy(vacancy, category):
         vacancy.get("title", "") + " " +
         vacancy.get("company", "") + " " +
         vacancy.get("salary", "") + " " +
-        vacancy.get("address", "")
+        vacancy.get("address", "") + " " +
+        vacancy.get("work_format", "")
     ).lower()
 
     title = vacancy.get("title", "").lower()
@@ -264,53 +272,67 @@ def vacancy_score(vacancy, category):
     return max(0, min(100, score))
 
 
-def get_vacancies_from_hh(query, category, salary, mode="remote", limit=3):
-    url = make_hh_link(query, salary=salary, mode=mode)
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36"
-        ),
-        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
+    params = {
+        "text": query,
+        "area": 113,
+        "salary": salary,
+        "only_with_salary": "true",
+        "period": 1,
+        "per_page": 30,
+        "order_by": "publication_time",
+        "search_field": ["name", "company_name", "description"],
     }
 
-    response = requests.get(url, headers=headers, timeout=25)
+    response = requests.get(
+        HH_API_URL,
+        params=params,
+        headers={"User-Agent": "hh-career-bot/1.6"},
+        timeout=30
+    )
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "lxml")
-    cards = soup.select("[data-qa='vacancy-serp__vacancy']")
+    data = response.json()
+    items = data.get("items", [])
 
     vacancies = []
 
-    for card in cards:
-        title_tag = card.select_one("[data-qa='serp-item__title']")
-        company_tag = card.select_one("[data-qa='vacancy-serp__vacancy-employer']")
-        salary_tag = card.select_one("[data-qa='vacancy-serp__vacancy-compensation']")
-        address_tag = card.select_one("[data-qa='vacancy-serp__vacancy-address']")
+    for item in items:
+        link = item.get("alternate_url", "")
 
-        if not title_tag:
+        if not link:
+            continue
+
+        if should_skip_vacancy(link):
+            continue
+
+        title = item.get("name", "")
+        company = (item.get("employer") or {}).get("name", "Компания не указана")
+        area = (item.get("area") or {}).get("name", "Город не указан")
+        salary_text = format_salary(item.get("salary"))
+        work_format = detect_work_format_from_api(item)
+
+        if only_remote and "удал" not in work_format.lower():
             continue
 
         vacancy = {
             "id": str(uuid.uuid4())[:8],
-            "title": title_tag.get_text(strip=True),
-            "company": company_tag.get_text(strip=True) if company_tag else "Компания не указана",
-            "salary": salary_tag.get_text(strip=True) if salary_tag else "Зарплата не указана",
-            "address": address_tag.get_text(strip=True) if address_tag else "Город не указан",
-            "link": title_tag.get("href", ""),
+            "title": title,
+            "company": company,
+            "salary": salary_text,
+            "address": area,
+            "work_format": work_format,
+            "link": link,
             "category": category,
+            "posted_time": item.get("published_at", ""),
         }
-
-        vacancy["work_format"] = detect_work_format(mode, vacancy)
-
-        if should_skip_vacancy(vacancy["link"]):
-            continue
 
         if is_good_vacancy(vacancy, category):
             vacancy["ai_score"] = vacancy_score(vacancy, category)
             vacancies.append(vacancy)
+
+        if len(vacancies) >= limit:
+            break
 
     vacancies.sort(key=lambda item: item.get("ai_score", 0), reverse=True)
     return vacancies[:limit]
@@ -369,6 +391,7 @@ def vacancy_text(vacancy):
         f"Город: {vacancy.get('address')}\n"
         f"Формат работы: {vacancy.get('work_format')}\n"
         f"Категория: {vacancy.get('category')}\n"
+        f"Дата публикации: {vacancy.get('posted_time')}\n"
         f"Ссылка: {vacancy.get('link')}"
     )
 
@@ -401,6 +424,19 @@ def make_ai_salary(vacancy):
         "1. Зарплата ниже рынка / нормальная / хорошая.\n"
         "2. Стоит ли откликаться.\n"
         "3. Если зарплата не указана — какой диапазон можно ожидать.\n\n"
+        "Вакансия:\n"
+        + vacancy_text(vacancy)
+    )
+
+
+def make_company_rating(vacancy):
+    return call_ai(
+        "Оцени компанию и вакансию с точки зрения риска для кандидата.\n\n"
+        "Нужно определить company_rating:\n"
+        "🟢 Хорошая — вакансия выглядит адекватно.\n"
+        "🟡 Нормальная — есть вопросы, но можно рассмотреть.\n"
+        "🔴 Подозрительная — есть признаки мусорной вакансии, скрытых продаж, массового найма, странных условий.\n\n"
+        "Ответ должен быть коротким: сначала один из трех рейтингов, потом 1–2 причины.\n\n"
         "Вакансия:\n"
         + vacancy_text(vacancy)
     )
@@ -468,11 +504,21 @@ def make_full_ai_pack(vacancy):
     time.sleep(1)
 
     cover_letter = make_cover_letter(vacancy)
+    time.sleep(1)
 
-    return ai_analysis, ai_salary, cover_letter
+    company_rating = make_company_rating(vacancy)
+
+    return ai_analysis, ai_salary, cover_letter, company_rating
 
 
-def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="новая"):
+def save_vacancy_full_to_sheet(
+    vacancy,
+    ai_analysis="",
+    ai_salary="",
+    cover_letter="",
+    company_rating="",
+    status="новая"
+):
     response = google_get({
         "action": "save_vacancy_full",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -488,6 +534,8 @@ def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_lett
         "ai_salary": ai_salary,
         "cover_letter": cover_letter,
         "status": status,
+        "company_rating": company_rating,
+        "posted_time": vacancy.get("posted_time", ""),
     })
 
     result = response.text.strip()
@@ -581,7 +629,8 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
         f"🏢 {vacancy['company']}\n"
         f"💰 {vacancy['salary']}\n"
         f"📍 {vacancy['address']}\n"
-        f"🏠 Формат: {vacancy.get('work_format', 'не указан')}"
+        f"🏠 Формат: {vacancy.get('work_format', 'не указан')}\n"
+        f"🕒 Опубликована: {vacancy.get('posted_time', 'не указано')}"
     )
 
     if ai_score != "":
@@ -605,49 +654,50 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
 
 
 def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, only_remote=False):
-    bot.send_message(chat_id, f"{title}\n\n💰 Зарплата от {salary:,} ₽", reply_markup=main_keyboard())
+    bot.send_message(
+        chat_id,
+        f"{title}\n\n💰 Зарплата от {salary:,} ₽\n🕒 Только вакансии за последние 24 часа",
+        reply_markup=main_keyboard()
+    )
 
     found_any = False
-    skipped_count = 0
-    search_modes = [("🏠 Удаленка — все города", "remote")]
 
-    if not only_remote:
-        search_modes.append(("🏢 Гибрид — Санкт-Петербург", "hybrid_spb"))
+    try:
+        vacancies = get_vacancies_from_hh(
+            query=query,
+            category=category,
+            salary=salary,
+            only_remote=only_remote,
+            limit=3
+        )
 
-    for mode_title, mode in search_modes:
-        bot.send_message(chat_id, mode_title)
-
-        try:
-            vacancies = get_vacancies_from_hh(query, category, salary, mode, limit=3)
-
-            if not vacancies:
-                continue
-
+        if vacancies:
             found_any = True
 
-            for vacancy in vacancies:
-                bot.send_message(chat_id, f"🤖 Анализирую и сохраняю в таблицу:\n{vacancy['title']}")
+        for vacancy in vacancies:
+            bot.send_message(chat_id, f"🤖 Анализирую и сохраняю в таблицу:\n{vacancy['title']}")
 
-                ai_analysis, ai_salary, cover_letter = make_full_ai_pack(vacancy)
+            ai_analysis, ai_salary, cover_letter, company_rating = make_full_ai_pack(vacancy)
 
-                save_vacancy_full_to_sheet(
-                    vacancy,
-                    ai_analysis=ai_analysis,
-                    ai_salary=ai_salary,
-                    cover_letter=cover_letter,
-                    status="новая"
-                )
+            save_vacancy_full_to_sheet(
+                vacancy,
+                ai_analysis=ai_analysis,
+                ai_salary=ai_salary,
+                cover_letter=cover_letter,
+                company_rating=company_rating,
+                status="новая"
+            )
 
-                send_vacancy_card(chat_id, vacancy)
+            send_vacancy_card(chat_id, vacancy)
 
-        except Exception as error:
-            print("HH ERROR:", error)
-            bot.send_message(chat_id, f"⚠️ Ошибка поиска/записи:\n{error}")
+    except Exception as error:
+        print("HH ERROR:", error)
+        bot.send_message(chat_id, f"⚠️ Ошибка поиска/записи:\n{error}")
 
     if not found_any:
         bot.send_message(
             chat_id,
-            "❌ Новых подходящих вакансий не найдено. Возможно, все свежие вакансии уже есть в таблице.",
+            "❌ Новых подходящих вакансий за последние 24 часа не найдено.",
             reply_markup=main_keyboard()
         )
 
@@ -740,13 +790,14 @@ def show_favorites(message):
             "status": item.get("status", "сохранено"),
             "category": "",
             "ai_score": "",
+            "posted_time": "",
         }
 
         send_vacancy_card(message.chat.id, vacancy, from_favorites=True)
 
 
 def send_daily_jobs_to_chat(chat_id):
-    bot.send_message(chat_id, "🔔 Ежедневная подборка новых вакансий", reply_markup=main_keyboard())
+    bot.send_message(chat_id, "🔔 Ежедневная подборка новых вакансий за 24 часа", reply_markup=main_keyboard())
     send_real_vacancies(chat_id, "🔎 Закупки", "менеджер по закупкам", "Закупки")
     send_real_vacancies(chat_id, "📦 Товародвижение", "товародвижение", "Товародвижение")
     send_real_vacancies(chat_id, "📊 Аналитик", "аналитик закупок", "Аналитик")
@@ -780,7 +831,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.5: бот не присылает дубли и учитывает статусы вакансий.\n"
+        "v1.6: только вакансии за 24 часа + AI-рейтинг компании.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -845,7 +896,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Выбери направление. Бот покажет только новые вакансии и не будет присылать обработанные повторно.",
+        "Бот ищет только свежие вакансии за 24 часа, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
         reply_markup=main_keyboard()
     )
 
