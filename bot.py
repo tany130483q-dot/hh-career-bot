@@ -211,7 +211,7 @@ def vacancy_score(vacancy, category):
 
     return max(0, min(100, score))
 
-def get_vacancies_from_hh(search_text):
+def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
     url = "https://api.hh.ru/vacancies"
 
     params = {
