@@ -212,10 +212,11 @@ def vacancy_score(vacancy, category):
     return max(0, min(100, score))
 
 def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
+
     url = "https://api.hh.ru/vacancies"
 
     params = {
-    "text": query,
+        "text": query,
         "per_page": 30,
         "order_by": "publication_time",
         "period": 3
@@ -232,16 +233,38 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
         return []
 
     data = response.json()
+
     vacancies = []
 
     for item in data.get("items", []):
 
         title = item.get("name", "")
         company = item.get("employer", {}).get("name", "")
-        salary = format_salary(item.get("salary"))
         link = item.get("alternate_url", "")
         address = item.get("area", {}).get("name", "")
         published = item.get("published_at", "")
+
+        salary_data = item.get("salary")
+
+        if salary_data:
+            salary_from = salary_data.get("from")
+            salary_to = salary_data.get("to")
+            currency = salary_data.get("currency", "RUR")
+
+            if salary_from and salary_to:
+                salary_text = f"{salary_from}-{salary_to} {currency}"
+
+            elif salary_from:
+                salary_text = f"от {salary_from} {currency}"
+
+            elif salary_to:
+                salary_text = f"до {salary_to} {currency}"
+
+            else:
+                salary_text = "не указана"
+
+        else:
+            salary_text = "не указана"
 
         snippet = (
             str(item.get("snippet", {}).get("requirement", "")) +
@@ -254,9 +277,9 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
 
         full_text = f"{title_lower} {snippet}"
 
-        # -------------------------------
-        # ОПРЕДЕЛЯЕМ ФОРМАТ РАБОТЫ
-        # -------------------------------
+        # -------------------------
+        # ОПРЕДЕЛЯЕМ ФОРМАТ
+        # -------------------------
 
         is_remote = any(word in full_text for word in [
             "удален",
@@ -273,33 +296,38 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
 
         is_office = any(word in full_text for word in [
             "офис",
-            "офисный",
-            "в офисе"
+            "в офисе",
+            "офисный"
         ])
 
-        # -------------------------------
-        # ЖЁСТКИЙ ФИЛЬТР
-        # -------------------------------
+        # -------------------------
+        # ФИЛЬТР ГОРОДОВ
+        # -------------------------
 
-        # СПБ → гибрид или удалёнка
-        if "санкт-петербург" in address_lower or "спб" in address_lower:
+        is_spb = (
+            "санкт-петербург" in address_lower or
+            "спб" in address_lower
+        )
+
+        # СПБ → гибрид/удаленка
+        if is_spb:
 
             if not (is_remote or is_hybrid):
                 continue
 
-        # остальные города → только удалёнка
+        # Остальные города → только удаленка
         else:
 
             if not is_remote:
                 continue
 
-        # офис сразу исключаем
+        # офис исключаем
         if is_office and not is_remote:
             continue
 
-        # -------------------------------
-        # ФОРМАТ
-        # -------------------------------
+        # -------------------------
+        # НАЗВАНИЕ ФОРМАТА
+        # -------------------------
 
         if is_remote:
             work_format = "удаленка"
@@ -313,7 +341,7 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
         vacancy = {
             "title": title,
             "company": company,
-            "salary": salary,
+            "salary": salary_text,
             "address": address,
             "link": link,
             "work_format": work_format,
@@ -322,8 +350,7 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
 
         vacancies.append(vacancy)
 
-    return vacancies
-    
+    return vacancies[:limit]
 def call_ai(prompt):
     if not OPENAI_API_KEY:
         return "AI-функция пока не подключена. Добавь OPENAI_API_KEY в Render Environment Variables."
