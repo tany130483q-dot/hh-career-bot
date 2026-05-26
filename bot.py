@@ -215,7 +215,7 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
     url = "https://api.hh.ru/vacancies"
 
     params = {
-        "text": search_text,
+    "text": query,
         "per_page": 30,
         "order_by": "publication_time",
         "period": 3
