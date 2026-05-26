@@ -288,14 +288,11 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
     HH_API_URL,
     params=params,
     headers={
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
-        ),
-        "HH-User-Agent": "career-assistant-bot/1.6 (tany.130483q@gmail.com)"
+        "User-Agent": "Mozilla/5.0",
+        "HH-User-Agent": "career-bot/1.0 (tany.130483q@gmail.com)"
     },
-    timeout=30
+    timeout=30,
+    verify=False
 )
     response.raise_for_status()
 
