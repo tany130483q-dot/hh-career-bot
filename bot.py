@@ -94,17 +94,6 @@ GOOD_WORDS_BY_CATEGORY = {
     ],
 }
 
-SKIP_STATUSES = [
-    "новая",
-    "ai готов",
-    "сохранено",
-    "откликнулась",
-    "отказ",
-    "не подходит",
-    "собеседование",
-    "удалена",
-]
-
 
 def main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -115,6 +104,37 @@ def main_keyboard():
     keyboard.row("🔔 Включить рассылку", "🔕 Выключить рассылку")
     keyboard.row("❓ Помощь")
     return keyboard
+
+
+def make_hh_link(query, salary=100000, mode="remote"):
+    encoded_query = quote(query)
+
+    if mode == "remote":
+        return (
+            "https://hh.ru/search/vacancy"
+            f"?text={encoded_query}"
+            "&area=113"
+            f"&salary={salary}"
+            "&only_with_salary=true"
+            "&work_schedule_by_days=FIVE_ON_TWO_OFF"
+            "&work_format=REMOTE"
+            "&search_field=name"
+            "&search_field=company_name"
+            "&search_field=description"
+        )
+
+    return (
+        "https://spb.hh.ru/search/vacancy"
+        f"?text={encoded_query}"
+        "&area=2"
+        f"&salary={salary}"
+        "&only_with_salary=true"
+        "&work_schedule_by_days=FIVE_ON_TWO_OFF"
+        "&work_format=HYBRID"
+        "&search_field=name"
+        "&search_field=company_name"
+        "&search_field=description"
+    )
 
 
 def google_get(params):
@@ -131,26 +151,26 @@ def test_google_connection():
         return f"error: {error}"
 
 
-def get_vacancy_status(link):
-    try:
-        response = google_get({
-            "action": "get_vacancy_status",
-            "link": link
-        })
-        return response.text.strip().lower()
-    except Exception as error:
-        print("GET VACANCY STATUS ERROR:", error)
-        return "not_found"
+def detect_work_format(mode, vacancy):
+    text = (
+        vacancy.get("title", "") + " " +
+        vacancy.get("address", "") + " " +
+        vacancy.get("company", "")
+    ).lower()
 
+    if mode == "remote":
+        return "удалённо"
 
-def should_skip_vacancy(link):
-    status = get_vacancy_status(link)
+    if mode == "hybrid_spb":
+        return "гибрид, Санкт-Петербург"
 
-    if status in SKIP_STATUSES:
-        print(f"SKIP VACANCY: {link} / status={status}")
-        return True
+    if "удален" in text or "remote" in text:
+        return "удалённо"
 
-    return False
+    if "гибрид" in text:
+        return "гибрид"
+
+    return "не указан"
 
 
 def is_good_vacancy(vacancy, category):
@@ -158,8 +178,7 @@ def is_good_vacancy(vacancy, category):
         vacancy.get("title", "") + " " +
         vacancy.get("company", "") + " " +
         vacancy.get("salary", "") + " " +
-        vacancy.get("address", "") + " " +
-        vacancy.get("work_format", "")
+        vacancy.get("address", "")
     ).lower()
 
     title = vacancy.get("title", "").lower()
@@ -212,98 +231,50 @@ def vacancy_score(vacancy, category):
     return max(0, min(100, score))
 
 
-def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
-    encoded_query = quote(query)
-
-    url = (
-        "https://hh.ru/search/vacancy?"
-        f"text={encoded_query}"
-        f"&salary={salary}"
-        "&area=113"
-        "&ored_clusters=true"
-        "&enable_snippets=true"
-        "&order_by=publication_time"
-        "&search_period=1"
-        "&only_with_salary=true"
-    )
+def get_vacancies_from_hh(query, category, salary, mode="remote", limit=3):
+    url = make_hh_link(query, salary=salary, mode=mode)
 
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
+            "Chrome/120.0 Safari/537.36"
         ),
         "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
     }
 
-    response = requests.get(url, headers=headers, timeout=30)
-
-    if response.status_code != 200:
-        raise Exception(f"HH PARSE ERROR: {response.status_code}")
+    response = requests.get(url, headers=headers, timeout=25)
+    response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "lxml")
-    vacancy_blocks = soup.find_all("div", attrs={"data-qa": "vacancy-serp__vacancy"})
+    cards = soup.select("[data-qa='vacancy-serp__vacancy']")
 
     vacancies = []
 
-    for block in vacancy_blocks:
-        try:
-            title_tag = block.find(attrs={"data-qa": "serp-item__title"})
-            if not title_tag:
-                continue
+    for card in cards:
+        title_tag = card.select_one("[data-qa='serp-item__title']")
+        company_tag = card.select_one("[data-qa='vacancy-serp__vacancy-employer']")
+        salary_tag = card.select_one("[data-qa='vacancy-serp__vacancy-compensation']")
+        address_tag = card.select_one("[data-qa='vacancy-serp__vacancy-address']")
 
-            title = title_tag.get_text(strip=True)
-            link = title_tag.get("href", "").split("?")[0]
+        if not title_tag:
+            continue
 
-            if not link:
-                continue
+        vacancy = {
+            "id": str(uuid.uuid4())[:8],
+            "title": title_tag.get_text(strip=True),
+            "company": company_tag.get_text(strip=True) if company_tag else "Компания не указана",
+            "salary": salary_tag.get_text(strip=True) if salary_tag else "Зарплата не указана",
+            "address": address_tag.get_text(strip=True) if address_tag else "Город не указан",
+            "link": title_tag.get("href", ""),
+            "category": category,
+        }
 
-            if should_skip_vacancy(link):
-                continue
+        vacancy["work_format"] = detect_work_format(mode, vacancy)
 
-            company_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-employer"})
-            company = company_tag.get_text(strip=True) if company_tag else "Компания не указана"
-
-            salary_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-compensation"})
-            salary_text = salary_tag.get_text(" ", strip=True) if salary_tag else "Зарплата не указана"
-
-            address_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-address"})
-            address = address_tag.get_text(" ", strip=True) if address_tag else "Город не указан"
-
-            full_text = block.get_text(" ", strip=True).lower()
-
-            work_format = "офис"
-            if "удален" in full_text or "удалён" in full_text:
-                work_format = "удалённо"
-            elif "гибрид" in full_text:
-                work_format = "гибрид"
-
-            posted_time = "за последние 24 часа"
-
-            vacancy = {
-                "id": str(uuid.uuid4())[:8],
-                "title": title,
-                "company": company,
-                "salary": salary_text,
-                "address": address,
-                "work_format": work_format,
-                "link": link,
-                "category": category,
-                "posted_time": posted_time,
-            }
-
-            if only_remote and work_format != "удалённо":
-                continue
-
-            if is_good_vacancy(vacancy, category):
-                vacancy["ai_score"] = vacancy_score(vacancy, category)
-                vacancies.append(vacancy)
-
-            if len(vacancies) >= limit:
-                break
-
-        except Exception as error:
-            print("PARSE VACANCY ERROR:", error)
+        if is_good_vacancy(vacancy, category):
+            vacancy["ai_score"] = vacancy_score(vacancy, category)
+            vacancies.append(vacancy)
 
     vacancies.sort(key=lambda item: item.get("ai_score", 0), reverse=True)
     return vacancies[:limit]
@@ -362,7 +333,6 @@ def vacancy_text(vacancy):
         f"Город: {vacancy.get('address')}\n"
         f"Формат работы: {vacancy.get('work_format')}\n"
         f"Категория: {vacancy.get('category')}\n"
-        f"Дата публикации: {vacancy.get('posted_time')}\n"
         f"Ссылка: {vacancy.get('link')}"
     )
 
@@ -400,61 +370,61 @@ def make_ai_salary(vacancy):
     )
 
 
-def make_company_rating(vacancy):
-    return call_ai(
-        "Оцени компанию и вакансию с точки зрения риска для кандидата.\n\n"
-        "Нужно определить company_rating:\n"
-        "🟢 Хорошая — вакансия выглядит адекватно.\n"
-        "🟡 Нормальная — есть вопросы, но можно рассмотреть.\n"
-        "🔴 Подозрительная — есть признаки мусорной вакансии, скрытых продаж, массового найма, странных условий.\n\n"
-        "Ответ коротко: сначала один из трех рейтингов, потом 1–2 причины.\n\n"
-        "Вакансия:\n"
-        + vacancy_text(vacancy)
-    )
-
-
 def make_cover_letter(vacancy):
     resume = get_resume_profile(vacancy.get("category", ""))
 
-    return call_ai(
-        "Напиши короткое сопроводительное письмо для hh.ru.\n\n"
-        "Кандидат — женщина. Письмо обязательно писать в женском роде.\n\n"
-        "Пиши в стиле обычного живого человека, а не как ChatGPT.\n"
-        "Текст должен выглядеть как нормальный отклик на hh.ru.\n"
-        "Стиль: спокойно, уверенно, по-деловому. Без пафоса.\n\n"
-        "ПРИМЕР СТИЛЯ:\n"
-        "Здравствуйте!\n"
-        "Заинтересовала ваша вакансия, потому что у меня как раз есть опыт в ...\n"
-        "Последние несколько лет работала с ...\n"
-        "Хорошо владею Excel, 1С ...\n"
-        "Думаю, мой опыт будет полезен вашей команде. Буду рада пообщаться подробнее.\n\n"
-        "ЗАПРЕЩЕНО:\n"
-        "- 'Уважаемые коллеги'\n"
-        "- 'Меня зовут'\n"
-        "- 'Вижу, что ваша команда ищет'\n"
-        "- 'Уверен, что мой опыт'\n"
-        "- 'Уверена, что мой опыт'\n"
-        "- 'достижения целей вашей компании'\n"
-        "- 'готова внести вклад'\n"
-        "- слишком официальные формулировки\n"
-        "- AI-style текст\n"
-        "- длинные абзацы\n"
-        "- чрезмерно продавать себя\n"
-        "- перечислять цифры из резюме без необходимости\n\n"
-        "ТРЕБОВАНИЯ:\n"
-        "- 4–6 предложений\n"
-        "- 2–3 коротких абзаца\n"
-        "- использовать ключевые слова из вакансии естественно\n"
-        "- письмо должно проходить ATS\n"
-        "- адаптировать письмо под конкретную вакансию\n"
-        "- использовать только релевантный опыт из резюме\n"
-        "- не выдумывать опыт\n"
-        "- писать от лица Татьяны\n\n"
-        f"Резюме кандидата:\n{resume}\n\n"
-        f"Вакансия:\n{vacancy_text(vacancy)}\n\n"
-        "Верни только текст письма."
-    )
+    vacancy_info = vacancy_text(vacancy)
 
+    return call_ai(
+        "Ты senior HR и карьерный консультант.\n\n"
+
+        "Нужно написать сопроводительное письмо для отклика на hh.ru.\n\n"
+
+        "Главная задача: письмо должно выглядеть как живой, человеческий отклик, "
+        "а не как текст, сгенерированный ИИ. При этом оно должно быть ATS-friendly.\n\n"
+
+        "КРИТИЧЕСКИ ВАЖНО:\n"
+        "- письмо должно быть написано естественным русским языком;\n"
+        "- не использовать шаблонные AI-фразы;\n"
+        "- не писать слишком идеально и слишком официально;\n"
+        "- не пересказывать резюме целиком;\n"
+        "- адаптировать письмо именно под эту вакансию;\n"
+        "- использовать ключевые слова из вакансии естественно;\n"
+        "- добавить только тот опыт, который реально есть в резюме;\n"
+        "- письмо должно отличаться от других откликов;\n"
+        "- не выдумывать опыт, инструменты и достижения.\n\n"
+
+        "ЗАПРЕЩЕНО ИСПОЛЬЗОВАТЬ ФРАЗЫ:\n"
+        "- Уважаемые коллеги;\n"
+        "- Меня зовут;\n"
+        "- Я заинтересован / заинтересована;\n"
+        "- Рассмотрите мою кандидатуру;\n"
+        "- Буду рад / буду рада стать частью команды;\n"
+        "- Имею успешный опыт;\n"
+        "- Ваша компания является лидером;\n"
+        "- Мой опыт идеально соответствует;\n"
+        "- [Ваше имя].\n\n"
+
+        "ФОРМАТ ПИСЬМА:\n"
+        "- 4–6 коротких строк;\n"
+        "- 500–900 символов;\n"
+        "- можно начать с 'Здравствуйте!' или сразу с сути;\n"
+        "- стиль: спокойный, уверенный, деловой, но живой;\n"
+        "- без воды и канцелярита;\n"
+        "- в конце можно коротко написать: 'Готова обсудить задачи подробнее.'\n\n"
+
+        "КАК ДЕЛАТЬ ATS:\n"
+        "- найди 3–6 ключевых слов из вакансии;\n"
+        "- вставь их естественно в текст;\n"
+        "- не перечисляй ключи списком;\n"
+        "- не повторяй одно и то же;\n"
+        "- связывай требования вакансии с опытом кандидата.\n\n"
+
+        f"Релевантное резюме кандидата:\n{resume}\n\n"
+        f"Вакансия:\n{vacancy_info}\n\n"
+
+        "Верни только готовое сопроводительное письмо без пояснений."
+    )
 
 def make_full_ai_pack(vacancy):
     ai_analysis = make_ai_analysis(vacancy)
@@ -464,21 +434,11 @@ def make_full_ai_pack(vacancy):
     time.sleep(1)
 
     cover_letter = make_cover_letter(vacancy)
-    time.sleep(1)
 
-    company_rating = make_company_rating(vacancy)
-
-    return ai_analysis, ai_salary, cover_letter, company_rating
+    return ai_analysis, ai_salary, cover_letter
 
 
-def save_vacancy_full_to_sheet(
-    vacancy,
-    ai_analysis="",
-    ai_salary="",
-    cover_letter="",
-    company_rating="",
-    status="новая"
-):
+def save_vacancy_full_to_sheet(vacancy, ai_analysis="", ai_salary="", cover_letter="", status="найдена"):
     response = google_get({
         "action": "save_vacancy_full",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -494,8 +454,6 @@ def save_vacancy_full_to_sheet(
         "ai_salary": ai_salary,
         "cover_letter": cover_letter,
         "status": status,
-        "company_rating": company_rating,
-        "posted_time": vacancy.get("posted_time", ""),
     })
 
     result = response.text.strip()
@@ -589,8 +547,7 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
         f"🏢 {vacancy['company']}\n"
         f"💰 {vacancy['salary']}\n"
         f"📍 {vacancy['address']}\n"
-        f"🏠 Формат: {vacancy.get('work_format', 'не указан')}\n"
-        f"🕒 Опубликована: {vacancy.get('posted_time', 'не указано')}"
+        f"🏠 Формат: {vacancy.get('work_format', 'не указан')}"
     )
 
     if ai_score != "":
@@ -614,52 +571,46 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
 
 
 def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, only_remote=False):
-    bot.send_message(
-        chat_id,
-        f"{title}\n\n💰 Зарплата от {salary:,} ₽\n🕒 Только вакансии за последние 24 часа",
-        reply_markup=main_keyboard()
-    )
+    bot.send_message(chat_id, f"{title}\n\n💰 Зарплата от {salary:,} ₽", reply_markup=main_keyboard())
 
     found_any = False
+    search_modes = [("🏠 Удаленка — все города", "remote")]
 
-    try:
-        vacancies = get_vacancies_from_hh(
-            query=query,
-            category=category,
-            salary=salary,
-            only_remote=only_remote,
-            limit=3
-        )
+    if not only_remote:
+        search_modes.append(("🏢 Гибрид — Санкт-Петербург", "hybrid_spb"))
 
-        if vacancies:
+    for mode_title, mode in search_modes:
+        bot.send_message(chat_id, mode_title)
+
+        try:
+            vacancies = get_vacancies_from_hh(query, category, salary, mode, limit=3)
+
+            if not vacancies:
+                continue
+
             found_any = True
 
-        for vacancy in vacancies:
-            bot.send_message(chat_id, f"🤖 Анализирую и сохраняю в таблицу:\n{vacancy['title']}")
+            for vacancy in vacancies:
+                bot.send_message(chat_id, f"🤖 Анализирую и сохраняю в таблицу:\n{vacancy['title']}")
 
-            ai_analysis, ai_salary, cover_letter, company_rating = make_full_ai_pack(vacancy)
+                ai_analysis, ai_salary, cover_letter = make_full_ai_pack(vacancy)
 
-            save_vacancy_full_to_sheet(
-                vacancy,
-                ai_analysis=ai_analysis,
-                ai_salary=ai_salary,
-                cover_letter=cover_letter,
-                company_rating=company_rating,
-                status="новая"
-            )
+                save_vacancy_full_to_sheet(
+                    vacancy,
+                    ai_analysis=ai_analysis,
+                    ai_salary=ai_salary,
+                    cover_letter=cover_letter,
+                    status="AI готов"
+                )
 
-            send_vacancy_card(chat_id, vacancy)
+                send_vacancy_card(chat_id, vacancy)
 
-    except Exception as error:
-        print("HH ERROR:", error)
-        bot.send_message(chat_id, f"⚠️ Ошибка поиска/записи:\n{error}")
+        except Exception as error:
+            print("HH ERROR:", error)
+            bot.send_message(chat_id, f"⚠️ Ошибка поиска/записи:\n{error}")
 
     if not found_any:
-        bot.send_message(
-            chat_id,
-            "❌ Новых подходящих вакансий за последние 24 часа не найдено.",
-            reply_markup=main_keyboard()
-        )
+        bot.send_message(chat_id, "❌ Подходящих вакансий не найдено.", reply_markup=main_keyboard())
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
@@ -750,14 +701,13 @@ def show_favorites(message):
             "status": item.get("status", "сохранено"),
             "category": "",
             "ai_score": "",
-            "posted_time": "",
         }
 
         send_vacancy_card(message.chat.id, vacancy, from_favorites=True)
 
 
 def send_daily_jobs_to_chat(chat_id):
-    bot.send_message(chat_id, "🔔 Ежедневная подборка новых вакансий за 24 часа", reply_markup=main_keyboard())
+    bot.send_message(chat_id, "🔔 Ежедневная подборка вакансий", reply_markup=main_keyboard())
     send_real_vacancies(chat_id, "🔎 Закупки", "менеджер по закупкам", "Закупки")
     send_real_vacancies(chat_id, "📦 Товародвижение", "товародвижение", "Товародвижение")
     send_real_vacancies(chat_id, "📊 Аналитик", "аналитик закупок", "Аналитик")
@@ -791,7 +741,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.6.1: поиск через hh.ru без API, вакансии за 24 часа + AI-рейтинг компании.\n"
+        "v1.4: добавлен формат работы и разные ATS-сопроводительные под разные резюме.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -856,7 +806,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Бот ищет свежие вакансии за 24 часа, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
+        "Выбери направление. Бот сам подберёт резюме, сделает AI-анализ и сохранит всё в Google Sheets.",
         reply_markup=main_keyboard()
     )
 
