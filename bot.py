@@ -25,7 +25,6 @@ SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwf3UPzjUZIzLsn64wluSEMBp3
 
 VACANCY_STORAGE = {}
 CURRENT_SALARY = 100000
-HH_API_URL = "https://api.hh.ru/vacancies"
 
 
 RESUME_PROFILES = {
@@ -154,67 +153,6 @@ def should_skip_vacancy(link):
     return False
 
 
-def detect_work_format_from_api(vacancy):
-    employment = vacancy.get("employment") or {}
-    schedule = vacancy.get("schedule") or {}
-    work_format = vacancy.get("work_format") or []
-    working_days = vacancy.get("working_days") or []
-
-    parts = []
-
-    for item in work_format:
-        name = item.get("name")
-        if name:
-            parts.append(name)
-
-    if schedule.get("name"):
-        parts.append(schedule.get("name"))
-
-    for item in working_days:
-        name = item.get("name")
-        if name:
-            parts.append(name)
-
-    if employment.get("name"):
-        parts.append(employment.get("name"))
-
-    if not parts:
-        return "не указан"
-
-    text = ", ".join(parts).lower()
-
-    if "удален" in text or "remote" in text:
-        return "удалённо"
-
-    if "гибрид" in text:
-        return "гибрид"
-
-    if "полный день" in text:
-        return "офис / полный день"
-
-    return ", ".join(parts)
-
-
-def format_salary(salary):
-    if not salary:
-        return "Зарплата не указана"
-
-    salary_from = salary.get("from")
-    salary_to = salary.get("to")
-    currency = salary.get("currency") or ""
-
-    if salary_from and salary_to:
-        return f"{salary_from}–{salary_to} {currency}"
-
-    if salary_from:
-        return f"от {salary_from} {currency}"
-
-    if salary_to:
-        return f"до {salary_to} {currency}"
-
-    return "Зарплата не указана"
-
-
 def is_good_vacancy(vacancy, category):
     full_text = (
         vacancy.get("title", "") + " " +
@@ -275,70 +213,97 @@ def vacancy_score(vacancy, category):
 
 
 def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
-    params = {
-        "text": query,
-        "area": 113,
-        "salary": salary,
-        "only_with_salary": "true",
-        "period": 1,
-        "per_page": 30,
-        "order_by": "publication_time",
-        "search_field": ["name", "company_name", "description"],
+    encoded_query = quote(query)
+
+    url = (
+        "https://hh.ru/search/vacancy?"
+        f"text={encoded_query}"
+        f"&salary={salary}"
+        "&area=113"
+        "&ored_clusters=true"
+        "&enable_snippets=true"
+        "&order_by=publication_time"
+        "&search_period=1"
+        "&only_with_salary=true"
+    )
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
     }
 
-    response = requests.get(
-    HH_API_URL,
-    params=params,
-    headers={
-        "User-Agent": "Mozilla/5.0",
-        "HH-User-Agent": "career-bot/1.0 (tany.130483q@gmail.com)"
-    },
-    timeout=30,
-    verify=False
-)
-    response.raise_for_status()
+    response = requests.get(url, headers=headers, timeout=30)
 
-    data = response.json()
-    items = data.get("items", [])
+    if response.status_code != 200:
+        raise Exception(f"HH PARSE ERROR: {response.status_code}")
+
+    soup = BeautifulSoup(response.text, "lxml")
+    vacancy_blocks = soup.find_all("div", attrs={"data-qa": "vacancy-serp__vacancy"})
 
     vacancies = []
 
-    for item in items:
-        link = item.get("alternate_url", "")
+    for block in vacancy_blocks:
+        try:
+            title_tag = block.find(attrs={"data-qa": "serp-item__title"})
+            if not title_tag:
+                continue
 
-        if not link:
-            continue
+            title = title_tag.get_text(strip=True)
+            link = title_tag.get("href", "").split("?")[0]
 
-        if should_skip_vacancy(link):
-            continue
+            if not link:
+                continue
 
-        title = item.get("name", "")
-        company = (item.get("employer") or {}).get("name", "Компания не указана")
-        area = (item.get("area") or {}).get("name", "Город не указан")
-        salary_text = format_salary(item.get("salary"))
-        work_format = detect_work_format_from_api(item)
+            if should_skip_vacancy(link):
+                continue
 
-        if only_remote and "удал" not in work_format.lower():
-            continue
+            company_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-employer"})
+            company = company_tag.get_text(strip=True) if company_tag else "Компания не указана"
 
-        vacancy = {
-            "id": str(uuid.uuid4())[:8],
-            "title": title,
-            "company": company,
-            "salary": salary_text,
-            "address": area,
-            "work_format": work_format,
-            "link": link,
-            "category": category,
-            "posted_time": item.get("published_at", ""),
-        }
+            salary_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-compensation"})
+            salary_text = salary_tag.get_text(" ", strip=True) if salary_tag else "Зарплата не указана"
 
-        if is_good_vacancy(vacancy, category):
-            vacancy["ai_score"] = vacancy_score(vacancy, category)
-            vacancies.append(vacancy)
+            address_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-address"})
+            address = address_tag.get_text(" ", strip=True) if address_tag else "Город не указан"
 
-        if len(vacancies) >= limit:
-            break
+            full_text = block.get_text(" ", strip=True).lower()
+
+            work_format = "офис"
+            if "удален" in full_text or "удалён" in full_text:
+                work_format = "удалённо"
+            elif "гибрид" in full_text:
+                work_format = "гибрид"
+
+            posted_time = "за последние 24 часа"
+
+            vacancy = {
+                "id": str(uuid.uuid4())[:8],
+                "title": title,
+                "company": company,
+                "salary": salary_text,
+                "address": address,
+                "work_format": work_format,
+                "link": link,
+                "category": category,
+                "posted_time": posted_time,
+            }
+
+            if only_remote and work_format != "удалённо":
+                continue
+
+            if is_good_vacancy(vacancy, category):
+                vacancy["ai_score"] = vacancy_score(vacancy, category)
+                vacancies.append(vacancy)
+
+            if len(vacancies) >= limit:
+                break
+
+        except Exception as error:
+            print("PARSE VACANCY ERROR:", error)
 
     vacancies.sort(key=lambda item: item.get("ai_score", 0), reverse=True)
     return vacancies[:limit]
@@ -442,7 +407,7 @@ def make_company_rating(vacancy):
         "🟢 Хорошая — вакансия выглядит адекватно.\n"
         "🟡 Нормальная — есть вопросы, но можно рассмотреть.\n"
         "🔴 Подозрительная — есть признаки мусорной вакансии, скрытых продаж, массового найма, странных условий.\n\n"
-        "Ответ должен быть коротким: сначала один из трех рейтингов, потом 1–2 причины.\n\n"
+        "Ответ коротко: сначала один из трех рейтингов, потом 1–2 причины.\n\n"
         "Вакансия:\n"
         + vacancy_text(vacancy)
     )
@@ -453,22 +418,16 @@ def make_cover_letter(vacancy):
 
     return call_ai(
         "Напиши короткое сопроводительное письмо для hh.ru.\n\n"
-
-        "Кандидат — женщина.\n"
-        "Письмо ОБЯЗАТЕЛЬНО писать в женском роде.\n\n"
-
+        "Кандидат — женщина. Письмо обязательно писать в женском роде.\n\n"
         "Пиши в стиле обычного живого человека, а не как ChatGPT.\n"
         "Текст должен выглядеть как нормальный отклик на hh.ru.\n"
-        "Стиль: спокойно, уверенно, по-деловому.\n"
-        "Без пафоса и без слишком идеальных формулировок.\n\n"
-
+        "Стиль: спокойно, уверенно, по-деловому. Без пафоса.\n\n"
         "ПРИМЕР СТИЛЯ:\n"
         "Здравствуйте!\n"
         "Заинтересовала ваша вакансия, потому что у меня как раз есть опыт в ...\n"
         "Последние несколько лет работала с ...\n"
         "Хорошо владею Excel, 1С ...\n"
         "Думаю, мой опыт будет полезен вашей команде. Буду рада пообщаться подробнее.\n\n"
-
         "ЗАПРЕЩЕНО:\n"
         "- 'Уважаемые коллеги'\n"
         "- 'Меня зовут'\n"
@@ -482,7 +441,6 @@ def make_cover_letter(vacancy):
         "- длинные абзацы\n"
         "- чрезмерно продавать себя\n"
         "- перечислять цифры из резюме без необходимости\n\n"
-
         "ТРЕБОВАНИЯ:\n"
         "- 4–6 предложений\n"
         "- 2–3 коротких абзаца\n"
@@ -491,13 +449,9 @@ def make_cover_letter(vacancy):
         "- адаптировать письмо под конкретную вакансию\n"
         "- использовать только релевантный опыт из резюме\n"
         "- не выдумывать опыт\n"
-        "- использовать женский род\n"
         "- писать от лица Татьяны\n\n"
-
         f"Резюме кандидата:\n{resume}\n\n"
-
         f"Вакансия:\n{vacancy_text(vacancy)}\n\n"
-
         "Верни только текст письма."
     )
 
@@ -837,7 +791,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.6: только вакансии за 24 часа + AI-рейтинг компании.\n"
+        "v1.6.1: поиск через hh.ru без API, вакансии за 24 часа + AI-рейтинг компании.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -902,7 +856,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Бот ищет только свежие вакансии за 24 часа, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
+        "Бот ищет свежие вакансии за 24 часа, сохраняет AI-анализ и рейтинг компании в Google Sheets.",
         reply_markup=main_keyboard()
     )
 
