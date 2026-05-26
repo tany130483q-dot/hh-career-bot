@@ -211,116 +211,119 @@ def vacancy_score(vacancy, category):
 
     return max(0, min(100, score))
 
+def get_vacancies_from_hh(search_text):
+    url = "https://api.hh.ru/vacancies"
 
-def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
-    encoded_query = quote(query)
-
-    url = (
-        "https://hh.ru/search/vacancy?"
-        f"text={encoded_query}"
-        f"&salary={salary}"
-        "&area=113"
-        "&ored_clusters=true"
-        "&enable_snippets=true"
-        "&order_by=publication_time"
-        "&search_period=3"
-        "&only_with_salary=true"
-    )
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
-        ),
-        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    params = {
+        "text": search_text,
+        "per_page": 30,
+        "order_by": "publication_time",
+        "period": 3
     }
 
-    response = requests.get(url, headers=headers, timeout=30)
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(url, params=params, headers=headers)
 
     if response.status_code != 200:
-        raise Exception(f"HH PARSE ERROR: {response.status_code}")
+        print(f"Ошибка HH API: {response.status_code}")
+        return []
 
-    soup = BeautifulSoup(response.text, "lxml")
-    vacancy_blocks = soup.find_all("div", attrs={"data-qa": "vacancy-serp__vacancy"})
-
+    data = response.json()
     vacancies = []
 
-    for block in vacancy_blocks:
-        try:
-            title_tag = block.find(attrs={"data-qa": "serp-item__title"})
-            if not title_tag:
+    for item in data.get("items", []):
+
+        title = item.get("name", "")
+        company = item.get("employer", {}).get("name", "")
+        salary = format_salary(item.get("salary"))
+        link = item.get("alternate_url", "")
+        address = item.get("area", {}).get("name", "")
+        published = item.get("published_at", "")
+
+        snippet = (
+            str(item.get("snippet", {}).get("requirement", "")) +
+            " " +
+            str(item.get("snippet", {}).get("responsibility", ""))
+        ).lower()
+
+        title_lower = title.lower()
+        address_lower = address.lower()
+
+        full_text = f"{title_lower} {snippet}"
+
+        # -------------------------------
+        # ОПРЕДЕЛЯЕМ ФОРМАТ РАБОТЫ
+        # -------------------------------
+
+        is_remote = any(word in full_text for word in [
+            "удален",
+            "удалён",
+            "remote",
+            "home office",
+            "работа из дома"
+        ])
+
+        is_hybrid = any(word in full_text for word in [
+            "гибрид",
+            "hybrid"
+        ])
+
+        is_office = any(word in full_text for word in [
+            "офис",
+            "офисный",
+            "в офисе"
+        ])
+
+        # -------------------------------
+        # ЖЁСТКИЙ ФИЛЬТР
+        # -------------------------------
+
+        # СПБ → гибрид или удалёнка
+        if "санкт-петербург" in address_lower or "спб" in address_lower:
+
+            if not (is_remote or is_hybrid):
                 continue
 
-            title = title_tag.get_text(strip=True)
-            link = title_tag.get("href", "").split("?")[0]
+        # остальные города → только удалёнка
+        else:
 
-            if not link:
+            if not is_remote:
                 continue
 
-            if should_skip_vacancy(link):
-                continue
+        # офис сразу исключаем
+        if is_office and not is_remote:
+            continue
 
-            company_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-employer"})
-            company = company_tag.get_text(strip=True) if company_tag else "Компания не указана"
+        # -------------------------------
+        # ФОРМАТ
+        # -------------------------------
 
-            salary_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-compensation"})
-            salary_text = salary_tag.get_text(" ", strip=True) if salary_tag else "Зарплата не указана"
+        if is_remote:
+            work_format = "удаленка"
 
-            address_tag = block.find(attrs={"data-qa": "vacancy-serp__vacancy-address"})
-            address = address_tag.get_text(" ", strip=True) if address_tag else "Город не указан"
+        elif is_hybrid:
+            work_format = "гибрид"
 
-            full_text = block.get_text(" ", strip=True).lower()
+        else:
+            work_format = "не указан"
 
-            work_format = "офис"
-            if "удален" in full_text or "удалён" in full_text:
-                work_format = "удалённо"
-            elif "гибрид" in full_text:
-                work_format = "гибрид"
+        vacancy = {
+            "title": title,
+            "company": company,
+            "salary": salary,
+            "address": address,
+            "link": link,
+            "work_format": work_format,
+            "published_at": published
+        }
 
-            address_lower = address.lower()
-            work_format_lower = work_format.lower()
+        vacancies.append(vacancy)
 
-            if "офис" in work_format_lower:
-                continue
-
-            if "гибрид" in work_format_lower and "санкт-петербург" not in address_lower:
-                continue
-
-            if "удал" not in work_format_lower and "гибрид" not in work_format_lower:
-                continue
-
-            if only_remote and "удал" not in work_format_lower:
-                continue
-
-            posted_time = "за последние 3 дня"
-
-            vacancy = {
-                "id": str(uuid.uuid4())[:8],
-                "title": title,
-                "company": company,
-                "salary": salary_text,
-                "address": address,
-                "work_format": work_format,
-                "link": link,
-                "category": category,
-                "posted_time": posted_time,
-            }
-
-            if is_good_vacancy(vacancy, category):
-                vacancy["ai_score"] = vacancy_score(vacancy, category)
-                vacancies.append(vacancy)
-
-            if len(vacancies) >= limit:
-                break
-
-        except Exception as error:
-            print("PARSE VACANCY ERROR:", error)
-
-    vacancies.sort(key=lambda item: item.get("ai_score", 0), reverse=True)
-    return vacancies[:limit]
-
-
+    return vacancies
+    
 def call_ai(prompt):
     if not OPENAI_API_KEY:
         return "AI-функция пока не подключена. Добавь OPENAI_API_KEY в Render Environment Variables."
