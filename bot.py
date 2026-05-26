@@ -285,11 +285,18 @@ def get_vacancies_from_hh(query, category, salary, only_remote=False, limit=3):
     }
 
     response = requests.get(
-        HH_API_URL,
-        params=params,
-        headers={"User-Agent": "hh-career-bot/1.6"},
-        timeout=30
-    )
+    HH_API_URL,
+    params=params,
+    headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+        "HH-User-Agent": "career-assistant-bot/1.6 (tany.130483q@gmail.com)"
+    },
+    timeout=30
+)
     response.raise_for_status()
 
     data = response.json()
