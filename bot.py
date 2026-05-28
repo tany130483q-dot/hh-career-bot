@@ -68,9 +68,27 @@ BAD_WORDS_COMMON = [
     "1с-программист", "разработчик 1с", "middle", "senior",
     "методология", "методолог", "методологии",
     "автомобиль", "автомобилей", "авто", "автоаукцион", "байер",
-    "английский", "английского", "english",
-    "китайский", "китайского", "chinese",
-    "upper-intermediate", "intermediate", "b1", "b2", "c1", "c2",
+]
+
+LANGUAGE_BLACKLIST = [
+    "англий", "english", "английский язык", "знание английского",
+    "технический английский", "technical english",
+    "intermediate", "upper-intermediate", "pre-intermediate",
+    "advanced", "fluent english", "business english",
+    "b1", "b2", "c1", "c2", "ielts", "toefl",
+    "чтение документации", "чтение технической документации",
+    "ведение переписки", "деловая переписка",
+    "переговоры на английском",
+    "международные поставщики", "международные закупки",
+    "иностранные поставщики", "переписка с поставщиками",
+    "общение с поставщиками из европы",
+    "европа", "европе",
+
+    "китайский", "китайского", "китайский язык", "знание китайского",
+    "chinese", "mandarin", "hsk",
+    "китай", "китаем", "китае",
+    "поставщики из китая", "работа с китаем",
+    "переговоры с китаем", "china suppliers",
 ]
 
 BAD_WORDS_TOVARODVIZHENIE = [
@@ -151,16 +169,30 @@ def should_skip_vacancy(link):
     return False
 
 
+def contains_language_requirement(text):
+    text = (text or "").lower()
+
+    for word in LANGUAGE_BLACKLIST:
+        if word in text:
+            return True
+
+    return False
+
+
 def is_good_vacancy(vacancy, category):
     full_text = (
         vacancy.get("title", "") + " " +
         vacancy.get("company", "") + " " +
         vacancy.get("salary", "") + " " +
         vacancy.get("address", "") + " " +
-        vacancy.get("work_format", "")
+        vacancy.get("work_format", "") + " " +
+        vacancy.get("raw_text", "")
     ).lower()
 
     title = vacancy.get("title", "").lower()
+
+    if contains_language_requirement(full_text):
+        return False
 
     for bad_word in BAD_WORDS_COMMON:
         if bad_word in full_text:
@@ -276,6 +308,13 @@ def parse_hh_page(url, category, work_format, limit):
 
     for block in vacancy_blocks:
         try:
+            raw_text = block.get_text(" ", strip=True)
+            raw_text_lower = raw_text.lower()
+
+            if contains_language_requirement(raw_text_lower):
+                print("SKIP LANGUAGE:", raw_text[:120])
+                continue
+
             title_tag = block.find(attrs={"data-qa": "serp-item__title"})
             if not title_tag:
                 continue
@@ -311,6 +350,7 @@ def parse_hh_page(url, category, work_format, limit):
                 "link": link,
                 "category": category,
                 "posted_time": "за последние 3 дня",
+                "raw_text": raw_text,
             }
 
             if is_good_vacancy(vacancy, category):
@@ -414,7 +454,7 @@ def make_ai_analysis(vacancy):
         "Задача:\n"
         "1. Подходит ли вакансия кандидату.\n"
         "2. Какие ключевые совпадения с резюме.\n"
-        "3. Какие риски: продажи, холодные звонки, английский, системная аналитика, офис.\n"
+        "3. Какие риски: продажи, холодные звонки, английский, китайский, системная аналитика, офис.\n"
         "4. Стоит ли откликаться.\n"
         "Ответ коротко, без воды.\n\n"
         "Вакансия:\n"
@@ -654,7 +694,7 @@ def send_vacancy_card(chat_id, vacancy, from_favorites=False):
 def send_real_vacancies(chat_id, title, query, category, salary=CURRENT_SALARY, only_remote=False):
     bot.send_message(
         chat_id,
-        f"{title}\n\n💰 Зарплата от {salary:,} ₽\n🕒 Только вакансии за последние 3 дня\n🏠 Другие города — только удалёнка\n🏢 Санкт-Петербург — гибрид или удалёнка",
+        f"{title}\n\n💰 Зарплата от {salary:,} ₽\n🕒 Только вакансии за последние 3 дня\n🏠 Другие города — только удалёнка\n🏢 Санкт-Петербург — гибрид или удалёнка\n🚫 Английский и китайский — исключаем",
         reply_markup=main_keyboard()
     )
 
@@ -829,7 +869,7 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "Бот работает ✅\n\n"
-        "v1.6.4: стабильный поиск за 3 дня — удалёнка РФ + гибрид СПБ.\n"
+        "v1.6.5: добавлен жесткий фильтр английского и китайского языка.\n"
         f"Google Sheets API: {google_status}",
         reply_markup=main_keyboard()
     )
@@ -894,7 +934,7 @@ def favorites(message):
 def help_button(message):
     bot.send_message(
         message.chat.id,
-        "Бот ищет свежие вакансии за 3 дня: удалёнка по РФ + гибрид Санкт-Петербург.",
+        "Бот ищет свежие вакансии за 3 дня: удалёнка по РФ + гибрид Санкт-Петербург. Английский и китайский исключаются.",
         reply_markup=main_keyboard()
     )
 
